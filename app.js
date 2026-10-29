@@ -15,10 +15,13 @@ const $ = (id) => document.getElementById(id);
 const state = {
   pdf: null,      // { id, name, bytes: Uint8Array }
   fields: [],     // [{ name, label, type, options, multi, multiline, maxLength, value, original, input }]
-  presets: {},    // valores fixos: { nomeDoCampo: valor }
+  places: [],     // locais de atendimento: [{ id, name, presets, favorite: { name } | null }]
+  placeId: null,  // local atual
+  presets: {},    // valores fixos do local atual: { nomeDoCampo: valor }
   shortcuts: [],  // atalhos: [{ id, name, values: { nomeDoCampo: valor } }]
   applied: {},    // campos preenchidos por atalho neste PDF: { nomeDoCampo: { name, value } }
   output: null,   // { blob, url, fileName }
+  touched: false, // se algo foi preenchido neste PDF (digitado ou por atalho)
   loading: false, // true enquanto um PDF está sendo aberto
   rendering: false,
 };
@@ -296,6 +299,7 @@ async function openPdf(name, bytes, { fromStorage = false } = {}) {
   $('result-info').textContent = '';
 
   state.applied = {};
+  state.touched = false;
   const fromPdf = state.fields.filter((f) => !isEmpty(f.original)).length;
   const embedded = readEmbeddedData(doc);
   const draft = await db.get(`draft:${id}`);
@@ -307,6 +311,7 @@ async function openPdf(name, bytes, { fromStorage = false } = {}) {
   } else if (draft) {
     applyValues(draft.values || draft);
     state.applied = draft.applied || {};
+    state.touched = !!draft.touched;
     source = 'Rascunho anterior restaurado.';
   } else {
     const applied = applyPresets();
@@ -326,6 +331,7 @@ async function openPdf(name, bytes, { fromStorage = false } = {}) {
   renderForm();
   renderPresets();
   renderShortcuts();
+  renderPlaces();
 
   $('form-card').hidden = false;
   $('shortcuts-card').hidden = !state.fields.length;
@@ -468,6 +474,121 @@ function applyFilter() {
   });
 }
 
+/* ---------- Locais de atendimento ---------- */
+
+function currentPlace() {
+  return state.places.find((p) => p.id === state.placeId);
+}
+
+function selectPlace(id) {
+  state.placeId = id;
+  state.presets = currentPlace().presets;
+}
+
+function savePlaces() {
+  return Promise.all([db.set('places', state.places), db.set('place', state.placeId)]);
+}
+
+function newPlaceId() {
+  return `local-${Date.now().toString(36)}-${state.places.length}`;
+}
+
+function renderPlaces() {
+  const sel = $('place-select');
+  sel.textContent = '';
+  for (const p of state.places) sel.append(new Option(p.name, p.id));
+  sel.value = state.placeId;
+  const place = currentPlace();
+  $('favorite-info').textContent = place.favorite
+    ? `Documento favorito: ${place.favorite.name}`
+    : 'Sem documento favorito. Abra o PDF em branco deste local e toque em "Tornar este PDF o favorito".';
+  $('open-favorite').hidden = !place.favorite;
+  $('set-favorite').hidden = !state.pdf || !!(place.favorite && place.favorite.id === state.pdf.id);
+  $('presets-place').textContent = place.name;
+}
+
+async function changePlace(id) {
+  selectPlace(id);
+  await savePlaces();
+  renderPlaces();
+  renderPresets();
+  state.fields.forEach(updateFieldStatus);
+  updatePreview();
+  if (currentPlace().favorite) await openFavorite();
+}
+
+async function setFavorite() {
+  if (!state.pdf) return;
+  const place = currentPlace();
+  const filled = state.fields.filter((f) => !isEmpty(f.original)).length;
+  if (filled && !confirm(`Este PDF já tem ${filled} campo(s) preenchido(s), que vão aparecer sempre que o favorito for aberto. Use de preferência o formulário em branco. Usar este mesmo assim?`)) return;
+  if (place.favorite && !confirm(`Substituir o favorito de "${place.name}" (${place.favorite.name})?`)) return;
+  await db.set(`fav:${place.id}`, { name: state.pdf.name, bytes: state.pdf.bytes });
+  place.favorite = { name: state.pdf.name, id: state.pdf.id };
+  await savePlaces();
+  renderPlaces();
+  toast(`"${state.pdf.name}" é o documento favorito de ${place.name}.`);
+}
+
+// Abre o formulário favorito do local para um novo atendimento. Como é sempre
+// o mesmo arquivo, um preenchimento anterior não terminado é oferecido antes
+// de ser descartado, para nunca misturar dois pacientes.
+async function openFavorite() {
+  const place = currentPlace();
+  const fav = await db.get(`fav:${place.id}`);
+  if (!fav || !fav.bytes) {
+    toast('Documento favorito não encontrado. Defina de novo.');
+    return;
+  }
+  const bytes = new Uint8Array(fav.bytes);
+  const id = await pdfId(fav.name, bytes);
+  await saveDraft();
+  const draft = await db.get(`draft:${id}`);
+  if (draft && (!draft.touched || confirm('Existe um preenchimento em andamento deste documento.\n\nOK: começar um novo atendimento (descarta o anterior)\nCancelar: continuar o anterior'))) {
+    await db.del(`draft:${id}`);
+    if (state.pdf && state.pdf.id === id) state.pdf = null; // não salvar de volta o rascunho descartado
+  }
+  await loadPdf(fav.name, bytes);
+}
+
+async function addPlace() {
+  const name = (prompt('Nome do novo local de atendimento:') || '').trim();
+  if (!name) return;
+  if (state.places.some((p) => normalize(p.name) === normalize(name))) {
+    toast('Já existe um local com esse nome.');
+    return;
+  }
+  state.places.push({ id: newPlaceId(), name, presets: {}, favorite: null });
+  await changePlace(state.places[state.places.length - 1].id);
+  toast(`Local "${name}" criado. Abra o PDF em branco dele e toque em "Tornar este PDF o favorito".`, 6000);
+}
+
+async function renamePlace() {
+  const place = currentPlace();
+  const name = (prompt('Novo nome do local:', place.name) || '').trim();
+  if (!name || name === place.name) return;
+  place.name = name;
+  await savePlaces();
+  renderPlaces();
+}
+
+async function removePlace() {
+  const place = currentPlace();
+  if (state.places.length < 2) {
+    toast('É preciso ter pelo menos um local.');
+    return;
+  }
+  if (!confirm(`Remover o local "${place.name}" com o documento favorito e os valores fixos dele?`)) return;
+  await db.del(`fav:${place.id}`);
+  state.places = state.places.filter((p) => p.id !== place.id);
+  selectPlace(state.places[0].id);
+  await savePlaces();
+  renderPlaces();
+  renderPresets();
+  state.fields.forEach(updateFieldStatus);
+  updatePreview();
+}
+
 /* ---------- Valores fixos ---------- */
 
 async function togglePreset(name) {
@@ -486,7 +607,7 @@ async function togglePreset(name) {
   updateFieldStatus(f);
   renderPresets();
   updatePreview();
-  await db.set('presets', state.presets);
+  await savePlaces();
 }
 
 function renderPresets() {
@@ -513,7 +634,7 @@ function renderPresets() {
       if (f) updateFieldStatus(f);
       renderPresets();
       updatePreview();
-      db.set('presets', state.presets);
+      savePlaces();
     });
     li.append(text, remove);
     list.append(li);
@@ -556,6 +677,7 @@ function applyShortcut(sc) {
     changed.push(f);
   }
   changed.forEach(updateFieldStatus);
+  if (changed.length) state.touched = true;
   updatePreview();
   saveDraft();
   const extra = skippedPdf ? ` (${skippedPdf} mantido(s) como veio no PDF)` : '';
@@ -690,7 +812,9 @@ async function exportConfig() {
     versao: 1,
     exportadoEm: new Date().toISOString(),
     atalhos: state.shortcuts,
+    localAtual: currentPlace().name,
     valoresFixos: state.presets,
+    locais: state.places.map((p) => ({ nome: p.name, valoresFixos: p.presets })),
   };
   const fileName = `aih-anamnese-atalhos-${timestamp()}.json`;
   const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
@@ -719,21 +843,30 @@ async function importConfig(file) {
     return;
   }
   const shortcuts = Array.isArray(config.atalhos) ? config.atalhos.filter((x) => x && x.name && x.values && typeof x.values === 'object') : [];
-  const presets = config.valoresFixos && typeof config.valoresFixos === 'object' ? config.valoresFixos : {};
-  if (!shortcuts.length && !Object.keys(presets).length) {
+  const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+  // Backups novos trazem os locais; os antigos, só os valores fixos de um local.
+  const places = Array.isArray(config.locais)
+    ? config.locais.filter((l) => l && l.nome && isObj(l.valoresFixos))
+    : (isObj(config.valoresFixos) ? [{ nome: currentPlace().name, valoresFixos: config.valoresFixos }] : []);
+  if (!shortcuts.length && !places.length) {
     toast('Nenhum atalho ou valor fixo encontrado no arquivo.');
     return;
   }
-  if (!confirm(`Importar ${shortcuts.length} atalho(s) e ${Object.keys(presets).length} valor(es) fixo(s)? Atalhos com o mesmo nome serão substituídos.`)) return;
+  if (!confirm(`Importar ${shortcuts.length} atalho(s) e ${places.length} local(is) com valores fixos? Atalhos com o mesmo nome serão substituídos.`)) return;
   for (const sc of shortcuts) {
     const existing = state.shortcuts.find((x) => normalize(x.name) === normalize(sc.name));
     if (existing) existing.values = sc.values;
     else state.shortcuts.push({ id: sc.id || `${Date.now().toString(36)}${state.shortcuts.length}`, name: sc.name, values: sc.values });
   }
-  Object.assign(state.presets, presets);
+  for (const l of places) {
+    const existing = state.places.find((p) => normalize(p.name) === normalize(l.nome));
+    if (existing) Object.assign(existing.presets, l.valoresFixos);
+    else state.places.push({ id: newPlaceId(), name: l.nome, presets: { ...l.valoresFixos }, favorite: null });
+  }
   await db.set('shortcuts', state.shortcuts);
-  await db.set('presets', state.presets);
+  await savePlaces();
   renderShortcuts();
+  renderPlaces();
   renderPresets();
   state.fields.forEach(updateFieldStatus);
   toast('Configuração importada.');
@@ -752,6 +885,7 @@ function buildPayload(values) {
     versao: 3,
     geradoEm: new Date().toISOString(),
     arquivoOriginal: state.pdf.name,
+    localAtendimento: currentPlace().name,
     paciente: findPatientName(values) || undefined,
     campos: values,
     origem,
@@ -771,6 +905,7 @@ function onFormInput(e) {
   if (state.rendering) return;
   const f = state.fields.find((x) => x.input === e.target);
   if (f) updateFieldStatus(f);
+  state.touched = true;
   updatePreview();
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraft, 400);
@@ -779,7 +914,7 @@ function onFormInput(e) {
 function saveDraft() {
   clearTimeout(draftTimer);
   if (!state.pdf || state.loading) return Promise.resolve();
-  return db.set(`draft:${state.pdf.id}`, { values: collectValues(), applied: state.applied });
+  return db.set(`draft:${state.pdf.id}`, { values: collectValues(), applied: state.applied, touched: state.touched });
 }
 
 /* ---------- Geração do PDF ---------- */
@@ -948,6 +1083,13 @@ $('import-input').addEventListener('change', async (e) => {
   if (file) await importConfig(file);
 });
 
+$('place-select').addEventListener('change', (e) => changePlace(e.target.value));
+$('open-favorite').addEventListener('click', openFavorite);
+$('set-favorite').addEventListener('click', setFavorite);
+$('add-place').addEventListener('click', addPlace);
+$('rename-place').addEventListener('click', renamePlace);
+$('remove-place').addEventListener('click', removePlace);
+
 $('generate').addEventListener('click', generate);
 $('share').addEventListener('click', share);
 $('open').addEventListener('click', openOutput);
@@ -955,8 +1097,17 @@ $('open').addEventListener('click', openOutput);
 /* ---------- Início ---------- */
 
 (async () => {
-  state.presets = (await db.get('presets')) || {};
+  state.places = (await db.get('places')) || [];
+  if (!state.places.length) {
+    // Primeiro uso, ou versão anterior com valores fixos sem local
+    state.places = [{ id: newPlaceId(), name: 'Meu local', presets: (await db.get('presets')) || {}, favorite: null }];
+    await db.del('presets');
+  }
+  const placeId = await db.get('place');
+  selectPlace(state.places.some((p) => p.id === placeId) ? placeId : state.places[0].id);
+  await savePlaces();
   state.shortcuts = (await db.get('shortcuts')) || [];
+  renderPlaces();
   renderPresets();
   renderShortcuts();
   const list = (await db.get('recent')) || [];

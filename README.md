@@ -13,6 +13,19 @@ Web app para iPhone que recebe o **PDF do paciente com AIH e anamnese juntos**, 
 
    Se você abrir de novo um PDF gerado pelo app, ele lê esses dados e preenche os campos.
 
+## Locais de atendimento e documento favorito
+
+Se você atende em mais de um lugar, cada **local de atendimento** tem:
+- o seu **documento favorito**: o formulário em branco daquele local, que abre com um toque em **Abrir documento favorito**, sem procurar o arquivo;
+- os seus **valores fixos** (ex.: estabelecimento, clínica).
+
+Os **atalhos** valem para todos os locais.
+
+- **Configurar:** em **Gerenciar locais**, crie ou renomeie o local. Depois abra o PDF em branco dele e toque em **Tornar este PDF o favorito**.
+- **Trocar de local:** escolha na lista do topo. O favorito daquele local já abre.
+- **Novo atendimento:** **Abrir documento favorito**. Se houver um preenchimento em andamento desse mesmo documento, o app pergunta se você quer continuar ou começar um novo, para nunca misturar dois pacientes.
+- O PDF gerado registra o local (`localAtendimento`).
+
 ## Atalhos
 
 Um atalho é um conjunto de textos com nome (ex.: "Apendicite") que preenche vários campos de uma vez: CID, queixa, HDA, clínica…
@@ -22,7 +35,7 @@ Um atalho é um conjunto de textos com nome (ex.: "Apendicite") que preenche vá
 - **Combinar:** em campos de texto longo (ex.: HDA) que já têm texto, o atalho **acrescenta** o texto numa nova linha, sem apagar o que já está lá; aplicar o mesmo atalho de novo não duplica. Nos demais campos, o valor é substituído.
 - **O que veio no PDF nunca é alterado** por um atalho.
 - Cada campo mostra a etiqueta com o nome do atalho que o preencheu (ex.: "Apendicite + Febre"), e o PDF gerado registra quais atalhos foram usados (`atalhosAplicados`).
-- **Gerenciar atalhos e backup:** lista os atalhos (com opção de remover) e permite **exportar/importar um backup** (arquivo `.json` com atalhos e valores fixos). Atalhos e valores fixos ficam só no iPhone, então vale guardar um backup.
+- **Gerenciar atalhos e backup:** lista os atalhos (com opção de remover) e permite **exportar/importar um backup** (arquivo `.json` com atalhos, locais e valores fixos; os PDFs favoritos não entram). Atalhos e valores fixos ficam só no iPhone, então vale guardar um backup.
 - Para editar um atalho, preencha a tela como quiser e salve com o mesmo nome: o app pergunta se deve substituir.
 
 ## Valores fixos
@@ -67,7 +80,7 @@ Não tem etapa de build: são arquivos estáticos. A biblioteca [pdf-lib](https:
 
 ```sh
 python3 -m http.server 8123          # servir localmente
-node tests/make-sample.js            # gera tests/exemplo-paciente-1.pdf e -2.pdf
+node tests/make-sample.js            # gera os PDFs de exemplo em tests/
 node tests/e2e.js                    # teste completo no navegador (requer Playwright)
 ```
 

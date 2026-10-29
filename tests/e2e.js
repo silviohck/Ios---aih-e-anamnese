@@ -53,7 +53,15 @@ async function generate(page) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => { errors.push(e.message); console.error('PAGE ERROR', e.stack); });
-  page.on('dialog', (d) => d.accept()); // confirmações (confirm)
+  // Confirmações: aceitas, a menos que o teste peça "Cancelar" antes.
+  // Perguntas (prompt): respondidas com o próximo texto de promptAnswers.
+  const promptAnswers = [];
+  let dismissNext = false;
+  page.on('dialog', (d) => {
+    if (d.type() === 'prompt') return d.accept(promptAnswers.shift() || '');
+    if (dismissNext) { dismissNext = false; return d.dismiss(); }
+    return d.accept();
+  });
   await page.goto(URL_APP);
 
   // Paciente 1: o cadastro já vem preenchido no PDF
@@ -240,6 +248,79 @@ async function generate(page) {
   await page.waitForSelector('#form-card:not([hidden])');
   assert.strictEqual(await page.locator('#shortcut-buttons button').count(), 3);
   assert.strictEqual(await page.textContent(badge(F.cid)), 'Apendicite');
+
+  // ---------- Locais de atendimento e documento favorito ----------
+  const BRANCO_HOSPITAL = path.join(__dirname, 'exemplo-branco-hospital.pdf');
+  const BRANCO_UPA = path.join(__dirname, 'exemplo-branco-upa.pdf');
+  assert.strictEqual(await page.inputValue('#place-select').then((id) => page.textContent(`#place-select option[value="${id}"]`)), 'Meu local');
+  await page.click('#place-card summary');
+  promptAnswers.push('Hospital São Lucas');
+  await page.click('#rename-place');
+  await page.waitForFunction(() => /Hospital São Lucas/.test(document.querySelector('#presets-place').textContent));
+  assert.strictEqual(await page.isVisible('#open-favorite'), false);
+
+  // Define o favorito do hospital
+  await page.setInputFiles('#pdf-input', BRANCO_HOSPITAL);
+  await page.waitForFunction(() => /branco-hospital/.test(document.querySelector('#pdf-info').textContent));
+  await page.click('#set-favorite');
+  await page.waitForFunction(() => /exemplo-branco-hospital/.test(document.querySelector('#favorite-info').textContent));
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas'); // valor fixo do local
+  assert.strictEqual(await page.isVisible('#set-favorite'), false); // já é o favorito
+
+  // Atendimento em andamento + "Abrir favorito": Cancelar continua o anterior
+  await page.fill(F.cid, 'R10.4');
+  await page.waitForTimeout(600);
+  dismissNext = true;
+  await page.click('#open-favorite');
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.inputValue(F.cid), 'R10.4');
+  // OK começa um atendimento novo, com os valores fixos
+  await page.click('#open-favorite');
+  await page.waitForFunction(() => document.querySelector('#f6').value === '');
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas');
+  assert.strictEqual(await page.inputValue(F.nome), '');
+  // Sem nada preenchido, abrir o favorito não pergunta nada
+  await page.click('#open-favorite');
+  await page.waitForTimeout(300);
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas');
+
+  // Novo local, com favorito e valores fixos próprios
+  promptAnswers.push('UPA Centro');
+  await page.click('#add-place');
+  await page.waitForFunction(() => /UPA Centro/.test(document.querySelector('#presets-place').textContent));
+  assert.match(await page.textContent('#presets-empty'), /Nenhum valor fixo/);
+  await page.setInputFiles('#pdf-input', BRANCO_UPA);
+  await page.waitForFunction(() => /branco-upa/.test(document.querySelector('#pdf-info').textContent));
+  assert.strictEqual(await page.inputValue(F.estabelecimento), ''); // fixos do hospital não vêm para a UPA
+  await page.click('#set-favorite');
+  await page.waitForFunction(() => /exemplo-branco-upa/.test(document.querySelector('#favorite-info').textContent));
+  await page.fill(F.estabelecimento, 'UPA Centro');
+  await page.click(pin(F.estabelecimento));
+
+  // Trocar de local abre o favorito daquele local
+  const placeId = (name) => page.evaluate((n) => [...document.querySelectorAll('#place-select option')].find((o) => o.textContent === n).value, name);
+  await page.selectOption('#place-select', await placeId('Hospital São Lucas'));
+  await page.waitForFunction(() => /branco-hospital/.test(document.querySelector('#pdf-info').textContent));
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas');
+  assert.strictEqual(await page.inputValue(F.carater), 'Urgencia');
+  await page.selectOption('#place-select', await placeId('UPA Centro'));
+  await page.waitForFunction(() => /branco-upa/.test(document.querySelector('#pdf-info').textContent));
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'UPA Centro');
+  assert.strictEqual(await page.inputValue(F.carater), '');
+  // Atalhos valem para todos os locais
+  await page.click('#shortcut-buttons button:text-is("Apendicite")');
+  assert.strictEqual(await page.inputValue(F.cid), 'K35.8');
+
+  doc = await generate(page);
+  data = JSON.parse(doc.getInfoDict().lookup(PDFName.of('AIHAnamneseDados')).decodeText());
+  assert.strictEqual(data.localAtendimento, 'UPA Centro');
+
+  // Locais e favoritos continuam depois de reabrir o app
+  await page.waitForTimeout(600);
+  await page.reload();
+  await page.waitForSelector('#form-card:not([hidden])');
+  assert.strictEqual(await page.locator('#place-select option').count(), 2);
+  assert.match(await page.textContent('#favorite-info'), /exemplo-branco-upa/);
 
   if (process.env.SHOT) {
     await page.screenshot({ path: process.env.SHOT, fullPage: true });

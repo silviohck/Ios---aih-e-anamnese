@@ -1,12 +1,13 @@
 // Gera PDFs de exemplo no formato usado no app: AIH (página 1) e anamnese
 // (página 2) no mesmo arquivo, com o cadastro do paciente já preenchido.
-// Saída: tests/exemplo-paciente-1.pdf e tests/exemplo-paciente-2.pdf
+// Saída: tests/exemplo-paciente-1.pdf, tests/exemplo-paciente-2.pdf e dois
+// formulários em branco (tests/exemplo-branco-*.pdf)
 // Uso: node tests/make-sample.js
 const fs = require('fs');
 const path = require('path');
 const { PDFDocument, PDFName, PDFHexString, StandardFonts } = require(path.join(__dirname, '..', 'vendor', 'pdf-lib.min.js'));
 
-async function build(patient) {
+async function build(patient, local = '') {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const form = doc.getForm();
@@ -28,7 +29,7 @@ async function build(patient) {
     y -= 40;
   };
 
-  newPage('Laudo para solicitação de AIH — exemplo');
+  newPage(`Laudo para solicitação de AIH — exemplo${local ? ` — ${local}` : ''}`);
   text('paciente.nome', 'Nome do paciente', { value: patient.nome });
   text('paciente.cns', 'Cartão SUS', { value: patient.cns });
   text('paciente.endereco', 'Endereço', { value: patient.endereco });
@@ -63,5 +64,8 @@ async function build(patient) {
   for (const [i, p] of pacientes.entries()) {
     fs.writeFileSync(path.join(__dirname, `exemplo-paciente-${i + 1}.pdf`), await build(p));
   }
+  // Formulários em branco de dois locais (para testar o documento favorito)
+  fs.writeFileSync(path.join(__dirname, 'exemplo-branco-hospital.pdf'), await build({}, 'Hospital São Lucas'));
+  fs.writeFileSync(path.join(__dirname, 'exemplo-branco-upa.pdf'), await build({}, 'UPA Centro'));
   console.log('PDFs de exemplo salvos em tests/');
 })();

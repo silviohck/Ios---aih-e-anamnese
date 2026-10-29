@@ -20,6 +20,25 @@
   </header>
 
   <main>
+    <section class="card" id="place-card">
+      <h2>Local de atendimento</h2>
+      <select id="place-select" aria-label="Local de atendimento"></select>
+      <p class="muted small" id="favorite-info"></p>
+      <div class="row">
+        <button class="btn primary" id="open-favorite" type="button" hidden>Abrir documento favorito</button>
+        <button class="btn" id="set-favorite" type="button" hidden>Tornar este PDF o favorito</button>
+      </div>
+      <details>
+        <summary>Gerenciar locais</summary>
+        <p class="muted small">Cada local tem o seu documento favorito e os seus valores fixos. Os atalhos valem para todos os locais.</p>
+        <div class="row">
+          <button class="btn" id="add-place" type="button">+ Novo local</button>
+          <button class="btn" id="rename-place" type="button">Renomear</button>
+          <button class="btn" id="remove-place" type="button">Remover</button>
+        </div>
+      </details>
+    </section>
+
     <section class="card" id="pdf-card">
       <h2>1. PDF do paciente</h2>
       <p class="muted small">AIH e anamnese no mesmo PDF. O que já vier preenchido (nome, endereço, cadastro) é mantido.</p>
@@ -42,7 +61,7 @@
       <details id="shortcuts-manage">
         <summary>Gerenciar atalhos e backup</summary>
         <ul class="item-list" id="shortcuts-list"></ul>
-        <p class="muted small">Os atalhos e valores fixos ficam só neste iPhone. Exporte um backup para não perdê-los ou para levá-los a outro aparelho.</p>
+        <p class="muted small">Atalhos, locais e valores fixos ficam só neste iPhone. Exporte um backup para não perdê-los ou para levá-los a outro aparelho. (Os documentos favoritos não vão no backup: guarde os PDFs em branco no app Arquivos.)</p>
         <div class="row">
           <button class="btn" id="export-config" type="button">Exportar backup</button>
           <label class="btn" for="import-input">Importar backup</label>
@@ -66,8 +85,8 @@
     </section>
 
     <section class="card" id="presets-card">
-      <h2>Valores fixos</h2>
-      <p class="muted small">Toque em <strong>Fixar</strong> ao lado de um campo para que aquele valor seja preenchido automaticamente em todo PDF novo, sempre que o campo vier vazio.</p>
+      <h2>Valores fixos — <span id="presets-place"></span></h2>
+      <p class="muted small">Toque em <strong>Fixar</strong> ao lado de um campo para que aquele valor seja preenchido automaticamente em todo PDF novo deste local, sempre que o campo vier vazio.</p>
       <p class="muted small" id="presets-empty">Nenhum valor fixo ainda.</p>
       <ul class="item-list" id="presets-list"></ul>
     </section>

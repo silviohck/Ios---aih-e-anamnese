@@ -162,7 +162,8 @@ dialog #shortcut-name { margin-bottom: 12px; }
 .check.pick { align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--border); }
 .check.pick input { flex: none; margin-top: 2px; }
 .check.pick span { min-width: 0; word-break: break-word; }
-#recent-select { margin-bottom: 8px; }
+#recent-select, #place-select { margin-bottom: 8px; }
+#place-select { font-weight: 600; }
 .field .hint { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; word-break: break-all; }
 
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
