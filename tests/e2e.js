@@ -1,15 +1,24 @@
-// Teste de ponta a ponta: abre o app num navegador com tela de iPhone,
-// carrega o PDF de exemplo, preenche, gera e confere o PDF resultante.
+// Teste de ponta a ponta: abre o app num navegador com tela de iPhone e
+// percorre o fluxo com dois pacientes (AIH + anamnese no mesmo PDF).
 // Uso: python3 -m http.server 8123 &  node tests/e2e.js [http://localhost:8123/]
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { chromium, devices } = require('playwright');
 const { PDFDocument, PDFName, PDFDict, PDFArray } = require(path.join(__dirname, '..', 'vendor', 'pdf-lib.min.js'));
 
 const URL_APP = process.argv[2] || 'http://localhost:8123/';
-const SAMPLE = path.join(__dirname, 'exemplo-aih.pdf');
-const SAMPLE_ANAMNESE = path.join(__dirname, 'exemplo-anamnese.pdf');
+const PACIENTE_1 = path.join(__dirname, 'exemplo-paciente-1.pdf');
+const PACIENTE_2 = path.join(__dirname, 'exemplo-paciente-2.pdf');
+
+// Ordem dos campos nos PDFs de exemplo
+const F = {
+  nome: '#f0', cns: '#f1', endereco: '#f2', estabelecimento: '#f3', carater: '#f4',
+  clinica: '#f5', cid: '#f6', medico: '#f7', queixa: '#f8', hda: '#f9', alergia: '#f10',
+};
+const pin = (sel) => `${sel.replace('#', '.field:has(#')}) .pin`;
+const badge = (sel) => `${sel.replace('#', '.field:has(#')}) .badge`;
 
 async function generatedBytes(page) {
   const b64 = await page.evaluate(async () => {
@@ -26,99 +35,127 @@ function attachmentCount(doc) {
   return arr ? arr.size() / 2 : 0;
 }
 
+async function openFile(page, file, infoPattern) {
+  await page.setInputFiles('#pdf-input', file);
+  await page.waitForFunction((re) => new RegExp(re).test(document.querySelector('#pdf-info').textContent), infoPattern);
+}
+
+async function generate(page) {
+  await page.click('#generate');
+  await page.waitForSelector('#result-actions:not([hidden])');
+  await page.waitForFunction(() => document.querySelector('#generate').textContent.startsWith('Gerar'));
+  return PDFDocument.load(await generatedBytes(page));
+}
+
 (async () => {
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ ...devices['iPhone 13'], acceptDownloads: true });
+  const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => { errors.push(e.message); console.error('PAGE ERROR', e.stack); });
+  page.on('dialog', (d) => d.accept());
   await page.goto(URL_APP);
 
-  await page.setInputFiles('#pdf-input', SAMPLE);
-  await page.waitForSelector('#form-card:not([hidden])');
-  assert.match(await page.textContent('#template-info'), /6 campo/);
-
-  await page.fill('#f0', 'Maria José da Conceição');
-  await page.fill('#f1', '123456789012345678'); // maxLength 15
-  await page.selectOption('#f2', 'Feminino');
-  await page.selectOption('#f3', 'Urgencia');
-  await page.check('#f4');
-  await page.fill('#f5', 'Dor abdominal há 3 dias → febre 38,5 °C.');
-  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace(/\.png$/, '-1.png'), fullPage: true });
+  // Paciente 1: o cadastro já vem preenchido no PDF
+  await openFile(page, PACIENTE_1, 'Maria José');
+  assert.match(await page.textContent('#pdf-info'), /2 página\(s\), 11 campo/);
+  assert.match(await page.textContent('#form-info'), /3 campo\(s\) já vieram preenchidos/);
+  assert.strictEqual(await page.inputValue(F.endereco), 'Rua das Flores, 120 — Centro');
+  assert.strictEqual(await page.textContent(badge(F.nome)), 'do PDF');
   assert.strictEqual(await page.isVisible('#share'), false); // só aparece depois de gerar
-  await page.click('#generate');
-  await page.waitForSelector('#result-actions:not([hidden])');
 
-  let doc = await PDFDocument.load(await generatedBytes(page));
-  const form = doc.getForm();
+  // "Só campos vazios" esconde o cadastro
+  await page.check('#only-empty');
+  assert.strictEqual(await page.isVisible(F.nome), false);
+  assert.strictEqual(await page.isVisible(F.cid), true);
+  await page.uncheck('#only-empty');
+
+  // Completa e fixa alguns valores
+  assert.strictEqual(await page.isDisabled(pin(F.estabelecimento)), true); // vazio não pode ser fixado
+  await page.fill(F.estabelecimento, 'Hospital São Lucas');
+  await page.selectOption(F.carater, 'Urgencia');
+  await page.selectOption(F.clinica, 'Clínica médica');
+  await page.fill(F.medico, 'Dr. Ana Souza — CRM 12345');
+  await page.check(F.alergia);
+  for (const f of [F.estabelecimento, F.carater, F.clinica, F.medico, F.alergia]) await page.click(pin(f));
+  assert.strictEqual(await page.textContent(pin(F.medico)), 'Fixado ✓');
+  assert.strictEqual(await page.locator('#presets-list li').count(), 5);
+  // Campos só deste paciente
+  await page.fill(F.cid, 'K35.8');
+  await page.fill(F.queixa, 'Dor abdominal');
+  await page.fill(F.hda, 'Dor em FID há 2 dias → febre 38 °C.');
+  assert.strictEqual(await page.textContent(badge(F.medico)), 'fixo');
+
+  let doc = await generate(page);
+  let form = doc.getForm();
   assert.strictEqual(form.getTextField('paciente.nome').getText(), 'Maria José da Conceição');
-  assert.strictEqual(form.getTextField('paciente.cns').getText(), '123456789012345');
-  assert.deepStrictEqual(form.getDropdown('paciente.sexo').getSelected(), ['Feminino']);
+  assert.strictEqual(form.getTextField('paciente.endereco').getText(), 'Rua das Flores, 120 — Centro');
+  assert.strictEqual(form.getTextField('estabelecimento').getText(), 'Hospital São Lucas');
   assert.strictEqual(form.getRadioGroup('carater_internacao').getSelected(), 'Urgencia');
+  assert.deepStrictEqual(form.getDropdown('clinica').getSelected(), ['Clínica médica']);
   assert.strictEqual(form.getCheckBox('tem_alergia').isChecked(), true);
-  assert.strictEqual(form.getTextField('anamnese_hda').getText(), 'Dor abdominal há 3 dias ? febre 38,5 °C.');
+  assert.strictEqual(form.getTextField('Texto2').getText(), 'Dor em FID há 2 dias ? febre 38 °C.');
   assert.match(doc.getTitle(), /Maria José/);
-  const data = JSON.parse(doc.getInfoDict().lookup(PDFName.of('AIHAnamneseDados')).decodeText());
-  assert.strictEqual(data.campos['anamnese_hda'], 'Dor abdominal há 3 dias → febre 38,5 °C.');
-  assert.strictEqual(data.paciente, 'Maria José da Conceição');
+  let data = JSON.parse(doc.getInfoDict().lookup(PDFName.of('AIHAnamneseDados')).decodeText());
+  assert.strictEqual(data.campos.Texto2, 'Dor em FID há 2 dias → febre 38 °C.');
+  assert.strictEqual(data.origem['paciente.nome'], 'pdf');
+  assert.strictEqual(data.origem.medico_solicitante, 'fixo');
+  assert.strictEqual(data.origem.cid_principal, 'digitado');
   assert.strictEqual(attachmentCount(doc), 1);
+  const preenchido = path.join(os.tmpdir(), 'aih-paciente-1-preenchido.pdf');
+  fs.writeFileSync(preenchido, await generatedBytes(page));
 
-  // Reabre o PDF gerado: os dados gravados devem voltar ao formulário
-  const tmp = path.join(require('os').tmpdir(), 'aih-preenchido.pdf');
-  fs.writeFileSync(tmp, await generatedBytes(page));
+  // Paciente 2: recebe os valores fixos, mas nada do paciente 1
+  await openFile(page, PACIENTE_2, 'João Pereira');
+  assert.match(await page.textContent('#form-info'), /5 valor\(es\) fixo\(s\) aplicado/);
+  assert.strictEqual(await page.inputValue(F.nome), 'João Pereira Lima');
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas');
+  assert.strictEqual(await page.inputValue(F.carater), 'Urgencia');
+  assert.strictEqual(await page.isChecked(F.alergia), true);
+  assert.strictEqual(await page.inputValue(F.cid), '');
+  assert.strictEqual(await page.inputValue(F.queixa), '');
+  // Desmarca alergia só para este paciente; ajusta o fixo do médico
+  await page.uncheck(F.alergia);
+  await page.fill(F.medico, 'Dr. Ana Souza — CRM 12345 (plantão)');
+  assert.strictEqual(await page.textContent(pin(F.medico)), 'Atualizar fixo');
+  await page.fill(F.cid, 'J18.9');
+
+  // Volta para o paciente 1 pela lista de recentes: rascunho dele intacto
+  await page.waitForTimeout(600); // rascunho é salvo 0,4 s depois da digitação
   await page.reload();
-  await page.setInputFiles('#pdf-input', tmp);
-  await page.waitForFunction(() => document.querySelector('#f0') && document.querySelector('#f0').value);
-  assert.strictEqual(await page.inputValue('#f5'), 'Dor abdominal há 3 dias → febre 38,5 °C.');
-  assert.match(await page.textContent('#form-info'), /gravados neste PDF/);
+  await page.waitForSelector('#form-card:not([hidden])');
+  assert.strictEqual(await page.inputValue(F.cid), 'J18.9'); // rascunho do paciente 2 salvo
+  const id1 = await page.evaluate(() => [...document.querySelectorAll('#recent-select option')].find((o) => o.textContent.startsWith('Maria')).value);
+  await page.selectOption('#recent-select', id1);
+  await page.waitForFunction(() => /Maria José/.test(document.querySelector('#pdf-info').textContent));
+  assert.strictEqual(await page.inputValue(F.cid), 'K35.8');
+  assert.strictEqual(await page.inputValue(F.queixa), 'Dor abdominal');
 
-  // Gera de novo, travando os campos: o anexo não pode duplicar
+  // "Restaurar como veio no PDF" mantém o cadastro e reaplica os fixos
+  await page.click('#restore-form');
+  await page.waitForFunction(() => document.querySelector('#f6').value === '');
+  assert.strictEqual(await page.inputValue(F.nome), 'Maria José da Conceição');
+  assert.strictEqual(await page.inputValue(F.estabelecimento), 'Hospital São Lucas');
+  assert.strictEqual(await page.inputValue(F.queixa), '');
+
+  // Remove um valor fixo pela lista
+  await page.click('#presets-list li:has-text("medico solicitante") button');
+  assert.strictEqual(await page.locator('#presets-list li').count(), 4);
+  assert.strictEqual(await page.textContent(pin(F.medico)), 'Fixar');
+
+  // Reabrir o PDF gerado traz de volta tudo o que foi gravado nele
+  await page.setInputFiles('#pdf-input', preenchido);
+  await page.waitForFunction(() => /Dados gravados/.test(document.querySelector('#form-info').textContent));
+  assert.strictEqual(await page.inputValue(F.hda), 'Dor em FID há 2 dias → febre 38 °C.');
   await page.check('#flatten');
-  await page.click('#generate');
-  await page.waitForFunction(() => document.querySelector('#generate').textContent.startsWith('Gerar'));
-  doc = await PDFDocument.load(await generatedBytes(page));
+  doc = await generate(page);
   assert.strictEqual(doc.getForm().getFields().length, 0);
   assert.strictEqual(attachmentCount(doc), 1);
 
-  // O modelo fica salvo no aparelho
-  await page.reload();
-  await page.waitForSelector('#form-card:not([hidden])');
-
-  // Segunda ficha: dados em comum vêm preenchidos da AIH
-  await page.setInputFiles('#pdf-input', SAMPLE_ANAMNESE);
-  await page.waitForFunction(() => /exemplo-anamnese/.test(document.querySelector('#template-info').textContent));
-  assert.strictEqual(await page.inputValue('#f0'), 'Maria José da Conceição'); // Texto1 (tooltip "Nome do paciente")
-  assert.strictEqual(await page.inputValue('#f1'), '123456789012345');         // cns_paciente
-  assert.strictEqual(await page.isChecked('#f5'), true);                       // tem_alergia
-  assert.match(await page.textContent('#form-info'), /da outra ficha/);
-  await page.fill('#f2', 'Dor abdominal');
-  await page.fill('#f0', 'Maria José da Conceição Silva');
-
-  // Troca para a AIH original: o nome corrigido na anamnese aparece lá
-  const aihId = await page.evaluate(() => [...document.querySelectorAll('#template-select option')].find((o) => o.textContent === 'exemplo-aih').value);
-  assert.strictEqual(await page.isVisible('#template-select'), true);
-  await page.selectOption('#template-select', aihId);
-  await page.waitForFunction(() => /exemplo-aih\.pdf/.test(document.querySelector('#template-info').textContent));
-  assert.strictEqual(await page.inputValue('#f0'), 'Maria José da Conceição Silva');
-  assert.strictEqual(await page.inputValue('#f1'), '123456789012345');
-
-  // Volta para a anamnese: o rascunho dela continua lá, mesmo depois de recarregar
-  await page.reload();
-  await page.waitForSelector('#form-card:not([hidden])');
-  const anaId = await page.evaluate(() => [...document.querySelectorAll('#template-select option')].find((o) => o.textContent === 'exemplo-anamnese').value);
-  await page.selectOption('#template-select', anaId);
-  await page.waitForFunction(() => /exemplo-anamnese/.test(document.querySelector('#template-info').textContent));
-  assert.strictEqual(await page.inputValue('#f2'), 'Dor abdominal');
-
-  // Novo paciente apaga tudo, em todas as fichas
-  page.on('dialog', (d) => d.accept());
-  await page.click('#new-patient');
-  await page.waitForFunction(() => document.querySelector('#f0').value === '');
-  await page.selectOption('#template-select', aihId);
-  await page.waitForFunction(() => /exemplo-aih\.pdf/.test(document.querySelector('#template-info').textContent));
-  assert.strictEqual(await page.inputValue('#f0'), '');
-  assert.strictEqual(await page.isChecked('#f4'), false);
-  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
+  if (process.env.SHOT) {
+    await openFile(page, PACIENTE_2, 'João Pereira');
+    await page.screenshot({ path: process.env.SHOT, fullPage: true });
+  }
 
   assert.deepStrictEqual(errors, []);
   await browser.close();

@@ -8,15 +8,16 @@ const {
 const APP_NAME = 'AIH & Anamnese';
 const DATA_KEY = 'AIHAnamneseDados';
 const ATTACHMENT_NAME = 'dados-preenchidos.json';
+const MAX_RECENT = 15;
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  template: null, // { name, bytes: Uint8Array, id }
-  fields: [],     // [{ name, label, type, options, multiline, maxLength, input }]
+  pdf: null,      // { id, name, bytes: Uint8Array }
+  fields: [],     // [{ name, label, type, options, multi, multiline, maxLength, value, original, input }]
+  presets: {},    // valores fixos: { nomeDoCampo: valor }
   output: null,   // { blob, url, fileName }
-  shared: {},     // valores em comum entre as fichas, por chave de campo
-  loading: false, // true enquanto uma ficha está sendo aberta
+  loading: false, // true enquanto um PDF está sendo aberto
   rendering: false,
 };
 
@@ -57,7 +58,7 @@ function toast(msg, ms = 3500) {
 }
 
 function normalize(s) {
-  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 function prettyName(name) {
@@ -87,7 +88,13 @@ function toWinAnsi(text) {
   return out;
 }
 
-function templateId(name, bytes) {
+// Identifica o arquivo pelo conteúdo: dois pacientes com PDFs de mesmo nome
+// nunca compartilham rascunho.
+async function pdfId(name, bytes) {
+  if (window.crypto && crypto.subtle) {
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return [...hash.slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
   return `${name}:${bytes.length}`;
 }
 
@@ -95,73 +102,62 @@ function isEmpty(v) {
   return v === undefined || v === null || v === '' || v === false || (Array.isArray(v) && !v.length);
 }
 
-/* ---------- Dados em comum entre as fichas ---------- */
+function sameValue(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
-// Chaves para reconhecer o "mesmo" campo em PDFs diferentes, ex.:
-// "paciente.nome", "nome_paciente" e "Nome do paciente" viram "nome paciente".
-// O rótulo gerado a partir de só uma parte do nome não é usado, para não
-// confundir "medico.nome" com "paciente.nome".
-const STOPWORDS = new Set(['de', 'do', 'da', 'dos', 'das', 'e', 'o', 'a']);
-function shareKeys(name, tooltip) {
-  const key = (s) => normalize(s).split(/[^a-z0-9]+/).filter((w) => w && !STOPWORDS.has(w)).sort().join(' ');
-  return [...new Set([key(name), tooltip ? key(tooltip) : ''].filter(Boolean))];
+function emptyValue(f) {
+  return f.type === 'checkbox' ? false : (f.multi ? [] : '');
+}
+
+function displayValue(v) {
+  if (v === true) return 'marcado';
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
 }
 
 function fitsField(f, v) {
   if (f.type === 'text') return typeof v === 'string';
   if (f.type === 'checkbox') return typeof v === 'boolean';
-  const list = Array.isArray(v) ? v : [v];
-  if (f.type === 'select' && f.multi) return list.every((o) => f.options.includes(o));
+  if (f.type === 'select' && f.multi) return Array.isArray(v) && v.every((o) => f.options.includes(o));
   return typeof v === 'string' && f.options.includes(v);
-}
-
-// O valor compartilhado é sempre o último digitado em qualquer ficha,
-// então ele prevalece sobre o rascunho (ex.: nome corrigido na outra ficha).
-function fillFromShared() {
-  let count = 0;
-  for (const f of state.fields) {
-    const k = f.keys.find((key) => key in state.shared && fitsField(f, state.shared[key]));
-    if (!k) continue;
-    if (JSON.stringify(f.value) !== JSON.stringify(state.shared[k])) count++;
-    f.value = state.shared[k];
-  }
-  return count;
-}
-
-function shareValue(f, value) {
-  for (const k of f.keys) {
-    if (isEmpty(value)) delete state.shared[k];
-    else state.shared[k] = value;
-  }
-}
-
-/* ---------- Modelos salvos ---------- */
-
-async function rememberTemplate(id, name, bytes) {
-  const list = (await db.get('templates')) || [];
-  if (!list.some((t) => t.id === id)) list.push({ id, name });
-  await db.set(`tpl:${id}`, { name, bytes });
-  await db.set('templates', list);
-  return list;
-}
-
-async function openSavedTemplate(id) {
-  const saved = await db.get(`tpl:${id}`);
-  if (saved && saved.bytes) await loadTemplate(saved.name, new Uint8Array(saved.bytes), { fromStorage: true });
-}
-
-function renderTemplateSelect(list, currentId) {
-  const sel = $('template-select');
-  sel.textContent = '';
-  for (const t of list) sel.append(new Option(t.name.replace(/\.pdf$/i, ''), t.id));
-  sel.value = currentId;
-  sel.hidden = list.length < 2;
 }
 
 function timestamp() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+/* ---------- PDFs recentes ---------- */
+
+async function rememberPdf(entry, bytes) {
+  let list = ((await db.get('recent')) || []).filter((t) => t.id !== entry.id);
+  list.unshift(entry);
+  for (const old of list.slice(MAX_RECENT)) {
+    await db.del(`pdf:${old.id}`);
+    await db.del(`draft:${old.id}`);
+  }
+  list = list.slice(0, MAX_RECENT);
+  if (bytes) await db.set(`pdf:${entry.id}`, { name: entry.name, bytes });
+  await db.set('recent', list);
+  return list;
+}
+
+async function openSavedPdf(id) {
+  const saved = await db.get(`pdf:${id}`);
+  if (saved && saved.bytes) await loadPdf(saved.name, new Uint8Array(saved.bytes), { fromStorage: true });
+}
+
+function renderRecent(list, currentId) {
+  const sel = $('recent-select');
+  sel.textContent = '';
+  for (const t of list) {
+    const when = new Date(t.openedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    sel.append(new Option(`${t.patient || t.name.replace(/\.pdf$/i, '')} — ${when}`, t.id));
+  }
+  sel.value = currentId;
+  sel.hidden = list.length < 2;
 }
 
 /* ---------- Dados gravados dentro do PDF ---------- */
@@ -210,7 +206,15 @@ function findPatientName(values) {
   return entry ? values[entry.name].trim() : '';
 }
 
-/* ---------- Leitura do modelo ---------- */
+// De onde veio cada valor: do PDF recebido, de um valor fixo ou digitado aqui.
+function originOf(f, value) {
+  if (isEmpty(value)) return '';
+  if (!isEmpty(f.original) && sameValue(value, f.original)) return 'pdf';
+  if (f.name in state.presets && sameValue(value, state.presets[f.name])) return 'fixo';
+  return 'digitado';
+}
+
+/* ---------- Leitura do PDF ---------- */
 
 function describeField(field) {
   const name = field.getName();
@@ -219,15 +223,12 @@ function describeField(field) {
     const tu = field.acroField.dict.lookup(PDFName.of('TU'));
     if (tu && typeof tu.decodeText === 'function') label = tu.decodeText().trim();
   } catch (_) { /* sem descrição */ }
-  const keys = shareKeys(name, label);
-  label = label || prettyName(name);
-  const base = { name, label, keys };
   const desc = describeValue(field);
-  return desc && Object.assign(base, desc);
+  if (!desc) return null;
+  return Object.assign({ name, label: label || prettyName(name), original: desc.value }, desc);
 }
 
 function describeValue(field) {
-
   if (field instanceof PDFTextField) {
     return { type: 'text', multiline: field.isMultiline(), maxLength: field.getMaxLength(), value: field.getText() || '' };
   }
@@ -244,19 +245,31 @@ function describeValue(field) {
   return null; // botões e assinaturas não são preenchidos
 }
 
-// Salva o rascunho da ficha atual e bloqueia novos salvamentos enquanto
-// a próxima abre, para nunca gravar campos de uma ficha no rascunho da outra.
-async function loadTemplate(name, bytes, options) {
+// Aplica os valores fixos só em campos vazios: o que já veio no PDF é mantido.
+function applyPresets() {
+  let count = 0;
+  for (const f of state.fields) {
+    const v = state.presets[f.name];
+    if (v === undefined || !isEmpty(f.value) || !fitsField(f, v)) continue;
+    f.value = v;
+    count++;
+  }
+  return count;
+}
+
+// Salva o rascunho do PDF atual e bloqueia novos salvamentos enquanto
+// o próximo abre, para nunca gravar campos de um paciente no rascunho de outro.
+async function loadPdf(name, bytes, options) {
   await saveDraft();
   state.loading = true;
   try {
-    await openTemplate(name, bytes, options);
+    await openPdf(name, bytes, options);
   } finally {
     state.loading = false;
   }
 }
 
-async function openTemplate(name, bytes, { fromStorage = false } = {}) {
+async function openPdf(name, bytes, { fromStorage = false } = {}) {
   let doc;
   try {
     doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
@@ -266,43 +279,46 @@ async function openTemplate(name, bytes, { fromStorage = false } = {}) {
     return;
   }
 
-  const id = templateId(name, bytes);
-  state.template = { name, bytes, id };
+  const id = await pdfId(name, bytes);
+  state.pdf = { id, name, bytes };
   state.fields = doc.getForm().getFields().map(describeField).filter(Boolean);
   state.output = null;
   $('result-actions').hidden = true;
   $('result-info').textContent = '';
 
-  const list = fromStorage ? ((await db.get('templates')) || []) : await rememberTemplate(id, name, bytes);
-  await db.set('current', id);
-  renderTemplateSelect(list, id);
-
+  const fromPdf = state.fields.filter((f) => !isEmpty(f.original)).length;
   const embedded = readEmbeddedData(doc);
   const draft = await db.get(`draft:${id}`);
-  let source = '';
+  let source;
   if (embedded && embedded.campos) {
     applyValues(embedded.campos);
-    for (const f of state.fields) shareValue(f, f.value);
-    await db.set('shared', state.shared);
-    source = ' Dados gravados neste PDF foram carregados.';
+    source = 'Dados gravados por este app no PDF foram carregados.';
+  } else if (draft) {
+    applyValues(draft);
+    source = 'Rascunho anterior restaurado.';
   } else {
-    if (draft) {
-      applyValues(draft);
-      source = ' Rascunho anterior restaurado.';
-    }
-    const shared = fillFromShared();
-    if (shared) source += ` ${shared} campo(s) preenchido(s) com dados da outra ficha.`;
+    const applied = applyPresets();
+    source = `${fromPdf} campo(s) já vieram preenchidos no PDF.` +
+      (applied ? ` ${applied} valor(es) fixo(s) aplicado(s).` : '');
   }
 
-  $('template-info').textContent = `${name} — ${doc.getPageCount()} página(s), ${state.fields.length} campo(s).`;
-  $('forget-template').hidden = false;
+  const patient = findPatientName(Object.fromEntries(state.fields.map((f) => [f.name, f.value])));
+  const list = await rememberPdf({ id, name, patient, openedAt: Date.now() }, fromStorage ? null : bytes);
+  await db.set('current', id);
+  renderRecent(list, id);
+
+  $('pdf-info').textContent = `${patient ? `${patient} — ` : ''}${name} — ${doc.getPageCount()} página(s), ${state.fields.length} campo(s).`;
+  $('forget-pdf').hidden = false;
+  $('only-empty').checked = false;
+  $('field-filter').value = '';
   renderForm();
+  renderPresets();
 
   $('form-card').hidden = false;
   $('output-card').hidden = !state.fields.length;
   $('data-card').hidden = !state.fields.length;
   $('form-info').textContent = state.fields.length
-    ? `Campos encontrados automaticamente no PDF.${source}`
+    ? source
     : 'Este PDF não tem campos preenchíveis. Use um PDF com formulário (campos em que se clica e digita).';
   updatePreview();
 }
@@ -316,6 +332,8 @@ function applyValues(values) {
 
 /* ---------- Formulário ---------- */
 
+const ORIGIN_LABEL = { pdf: 'do PDF', fixo: 'fixo', digitado: '' };
+
 function renderForm() {
   const form = $('fields-form');
   // Remover um campo em foco pode disparar "change"; ignorado enquanto redesenha.
@@ -327,19 +345,18 @@ function renderForm() {
     wrap.className = 'field';
     wrap.dataset.search = normalize(`${f.label} ${f.name}`);
     const id = `f${i}`;
+    const head = document.createElement('div');
+    head.className = 'field-head';
 
     let input;
+    const label = document.createElement('label');
     if (f.type === 'checkbox') {
-      const label = document.createElement('label');
       label.className = 'check';
       input = document.createElement('input');
       input.type = 'checkbox';
-      input.id = id;
       input.checked = !!f.value;
       label.append(input, document.createTextNode(f.label));
-      wrap.append(label);
     } else {
-      const label = document.createElement('label');
       label.htmlFor = id;
       label.textContent = f.label;
       if (f.label !== f.name) {
@@ -348,49 +365,163 @@ function renderForm() {
         hint.textContent = f.name;
         label.append(hint);
       }
-      wrap.append(label);
-
-      if (f.type === 'text') {
-        input = document.createElement(f.multiline ? 'textarea' : 'input');
-        if (!f.multiline) input.type = 'text';
-        if (f.maxLength) input.maxLength = f.maxLength;
-        input.value = f.value || '';
-      } else {
-        input = document.createElement('select');
-        if (f.type === 'select' && f.multi) input.multiple = true;
-        else input.append(new Option('—', ''));
-        for (const opt of f.options) input.append(new Option(opt, opt));
-        const selected = Array.isArray(f.value) ? f.value : [f.value];
-        for (const o of input.options) o.selected = selected.includes(o.value) && o.value !== '';
-        if (!input.multiple && !f.value) input.value = '';
-      }
-      input.id = id;
-      wrap.append(input);
     }
+    input = input || createInput(f);
+    input.id = id;
+
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = 'pin';
+    pin.dataset.field = f.name;
+
+    head.append(label, badge, pin);
+    wrap.append(head);
+    if (f.type !== 'checkbox') wrap.append(input);
     f.input = input;
+    f.badge = badge;
+    f.pin = pin;
     form.append(wrap);
+    updateFieldStatus(f);
   });
+}
+
+function createInput(f) {
+  let input;
+  if (f.type === 'text') {
+    input = document.createElement(f.multiline ? 'textarea' : 'input');
+    if (!f.multiline) input.type = 'text';
+    if (f.maxLength) input.maxLength = f.maxLength;
+    input.value = f.value || '';
+  } else {
+    input = document.createElement('select');
+    if (f.type === 'select' && f.multi) input.multiple = true;
+    else input.append(new Option('—', ''));
+    for (const opt of f.options) input.append(new Option(opt, opt));
+    const selected = Array.isArray(f.value) ? f.value : [f.value];
+    for (const o of input.options) o.selected = selected.includes(o.value) && o.value !== '';
+    if (!input.multiple && !f.value) input.value = '';
+  }
+  return input;
+}
+
+function readInput(f) {
+  const el = f.input;
+  if (f.type === 'checkbox') return el.checked;
+  if (f.type === 'select' && f.multi) return [...el.selectedOptions].map((o) => o.value);
+  return el.value;
+}
+
+function updateFieldStatus(f) {
+  const value = readInput(f);
+  const origin = originOf(f, value);
+  f.badge.textContent = ORIGIN_LABEL[origin] || '';
+  f.badge.dataset.origin = origin;
+  f.badge.hidden = !f.badge.textContent;
+
+  const preset = state.presets[f.name];
+  if (preset === undefined) {
+    f.pin.textContent = 'Fixar';
+    f.pin.disabled = isEmpty(value);
+    f.pin.setAttribute('aria-pressed', 'false');
+  } else if (sameValue(preset, value)) {
+    f.pin.textContent = 'Fixado ✓';
+    f.pin.disabled = false;
+    f.pin.setAttribute('aria-pressed', 'true');
+  } else {
+    f.pin.textContent = 'Atualizar fixo';
+    f.pin.disabled = isEmpty(value);
+    f.pin.setAttribute('aria-pressed', 'false');
+  }
+  f.pin.title = preset === undefined
+    ? 'Usar este valor automaticamente nos próximos PDFs'
+    : `Valor fixo: ${displayValue(preset)}`;
 }
 
 function collectValues() {
   const values = {};
-  for (const f of state.fields) {
-    const el = f.input;
-    if (f.type === 'checkbox') values[f.name] = el.checked;
-    else if (f.type === 'select' && f.multi) values[f.name] = [...el.selectedOptions].map((o) => o.value);
-    else values[f.name] = el.value;
-  }
+  for (const f of state.fields) values[f.name] = readInput(f);
   return values;
 }
 
+function applyFilter() {
+  const q = normalize($('field-filter').value.trim());
+  const onlyEmpty = $('only-empty').checked;
+  state.fields.forEach((f) => {
+    const wrap = f.input.closest('.field');
+    wrap.hidden = (q && !wrap.dataset.search.includes(q)) || (onlyEmpty && !isEmpty(readInput(f)));
+  });
+}
+
+/* ---------- Valores fixos ---------- */
+
+async function togglePreset(name) {
+  const f = state.fields.find((x) => x.name === name);
+  if (!f) return;
+  const value = readInput(f);
+  const preset = state.presets[name];
+  if (preset !== undefined && sameValue(preset, value)) {
+    delete state.presets[name];
+    toast(`"${f.label}" não é mais fixo.`);
+  } else {
+    if (isEmpty(value)) return;
+    state.presets[name] = value;
+    toast(`"${f.label}" fixado: será preenchido nos próximos PDFs quando estiver vazio.`);
+  }
+  updateFieldStatus(f);
+  renderPresets();
+  updatePreview();
+  await db.set('presets', state.presets);
+}
+
+function renderPresets() {
+  const list = $('presets-list');
+  list.textContent = '';
+  const names = Object.keys(state.presets);
+  $('presets-empty').hidden = names.length > 0;
+  for (const name of names) {
+    const f = state.fields.find((x) => x.name === name);
+    const li = document.createElement('li');
+    const text = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = f ? f.label : prettyName(name);
+    const value = document.createElement('span');
+    value.className = 'muted small';
+    value.textContent = displayValue(state.presets[name]);
+    text.append(title, document.createElement('br'), value);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn';
+    remove.textContent = 'Remover';
+    remove.addEventListener('click', () => {
+      delete state.presets[name];
+      if (f) updateFieldStatus(f);
+      renderPresets();
+      updatePreview();
+      db.set('presets', state.presets);
+    });
+    li.append(text, remove);
+    list.append(li);
+  }
+}
+
+/* ---------- Dados e rascunho ---------- */
+
 function buildPayload(values) {
+  const origem = {};
+  for (const f of state.fields) {
+    const o = originOf(f, values[f.name]);
+    if (o) origem[f.name] = o;
+  }
   return {
     app: APP_NAME,
-    versao: 1,
+    versao: 2,
     geradoEm: new Date().toISOString(),
-    modelo: state.template.name,
+    arquivoOriginal: state.pdf.name,
     paciente: findPatientName(values) || undefined,
     campos: values,
+    origem,
   };
 }
 
@@ -402,20 +533,17 @@ function updatePreview() {
 let draftTimer;
 function onFormInput(e) {
   if (state.rendering) return;
-  updatePreview();
   const f = state.fields.find((x) => x.input === e.target);
-  if (f) shareValue(f, collectValues()[f.name]);
+  if (f) updateFieldStatus(f);
+  updatePreview();
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraft, 400);
 }
 
 function saveDraft() {
   clearTimeout(draftTimer);
-  if (!state.template || state.loading) return Promise.resolve();
-  return Promise.all([
-    db.set(`draft:${state.template.id}`, collectValues()),
-    db.set('shared', state.shared),
-  ]);
+  if (!state.pdf || state.loading) return Promise.resolve();
+  return db.set(`draft:${state.pdf.id}`, collectValues());
 }
 
 /* ---------- Geração do PDF ---------- */
@@ -429,12 +557,13 @@ async function generate() {
     const payload = buildPayload(values);
     const json = JSON.stringify(payload, null, 2);
 
-    const doc = await PDFDocument.load(state.template.bytes, { ignoreEncryption: true });
+    const doc = await PDFDocument.load(state.pdf.bytes, { ignoreEncryption: true });
     const form = doc.getForm();
     const problems = [];
 
     for (const f of state.fields) {
       const v = values[f.name];
+      if (sameValue(v, f.original)) continue; // mantém intacto o que veio no PDF
       try {
         const field = form.getField(f.name);
         if (field instanceof PDFTextField) {
@@ -461,8 +590,8 @@ async function generate() {
 
     // Registro dos dados dentro do arquivo
     const patient = payload.paciente;
-    doc.setTitle(patient ? `AIH / Anamnese — ${patient}` : `AIH / Anamnese — ${state.template.name}`);
-    doc.setSubject(`Preenchido em ${new Date().toLocaleString('pt-BR')} — ${Object.keys(values).length} campo(s)`);
+    doc.setTitle(patient ? `AIH / Anamnese — ${patient}` : `AIH / Anamnese — ${state.pdf.name}`);
+    doc.setSubject(`Preenchido em ${new Date().toLocaleString('pt-BR')} — ${Object.keys(payload.origem).length} campo(s) com dados`);
     doc.setKeywords(['AIH', 'Anamnese', ...(patient ? [patient] : [])]);
     doc.setCreator(APP_NAME);
     doc.setProducer(`${APP_NAME} (pdf-lib)`);
@@ -480,7 +609,7 @@ async function generate() {
     if ($('flatten').checked) form.flatten();
 
     const bytes = await doc.save();
-    const base = state.template.name.replace(/\.pdf$/i, '');
+    const base = state.pdf.name.replace(/\.pdf$/i, '');
     const fileName = `${base}-preenchido-${timestamp()}.pdf`;
     if (state.output) URL.revokeObjectURL(state.output.url);
     const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -514,10 +643,10 @@ async function share() {
       if (e.name === 'AbortError') return;
     }
   }
-  openPdf();
+  openOutput();
 }
 
-function openPdf() {
+function openOutput() {
   const out = state.output;
   if (!out) return;
   const win = window.open(out.url, '_blank');
@@ -531,17 +660,17 @@ $('pdf-input').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
-  await loadTemplate(file.name, bytes);
+  await loadPdf(file.name, bytes);
 });
 
-$('template-select').addEventListener('change', (e) => openSavedTemplate(e.target.value));
+$('recent-select').addEventListener('change', (e) => openSavedPdf(e.target.value));
 
-$('forget-template').addEventListener('click', async () => {
-  if (!confirm(`Remover o modelo "${state.template.name}" e o rascunho dele deste aparelho?`)) return;
-  const id = state.template.id;
-  const list = ((await db.get('templates')) || []).filter((t) => t.id !== id);
-  await db.set('templates', list);
-  await db.del(`tpl:${id}`);
+$('forget-pdf').addEventListener('click', async () => {
+  if (!confirm(`Remover "${state.pdf.name}" e o rascunho dele deste aparelho?`)) return;
+  const id = state.pdf.id;
+  const list = ((await db.get('recent')) || []).filter((t) => t.id !== id);
+  await db.set('recent', list);
+  await db.del(`pdf:${id}`);
   await db.del(`draft:${id}`);
   if (list.length) await db.set('current', list[0].id);
   else await db.del('current');
@@ -551,64 +680,37 @@ $('forget-template').addEventListener('click', async () => {
 $('fields-form').addEventListener('input', onFormInput);
 $('fields-form').addEventListener('change', onFormInput);
 $('fields-form').addEventListener('submit', (e) => e.preventDefault());
-
-$('field-filter').addEventListener('input', (e) => {
-  const q = normalize(e.target.value.trim());
-  for (const el of $('fields-form').children) el.hidden = q && !el.dataset.search.includes(q);
+$('fields-form').addEventListener('click', (e) => {
+  const pin = e.target.closest('.pin');
+  if (pin) togglePreset(pin.dataset.field);
 });
 
-function emptyValue(f) {
-  return f.type === 'checkbox' ? false : (f.multi ? [] : '');
-}
+$('field-filter').addEventListener('input', applyFilter);
+$('only-empty').addEventListener('change', applyFilter);
 
-$('clear-form').addEventListener('click', async () => {
-  if (!confirm('Apagar o que foi preenchido nesta ficha?')) return;
-  for (const f of state.fields) {
-    f.value = emptyValue(f);
-    shareValue(f, f.value);
-  }
+$('restore-form').addEventListener('click', async () => {
+  if (!confirm('Voltar os campos para como vieram no PDF (mais os valores fixos)? O que foi digitado aqui será apagado.')) return;
+  for (const f of state.fields) f.value = f.original;
+  applyPresets();
   renderForm();
+  applyFilter();
   updatePreview();
   await saveDraft();
 });
 
-$('new-patient').addEventListener('click', async () => {
-  if (!confirm('Começar um novo paciente? Os dados preenchidos em todas as fichas serão apagados.')) return;
-  clearTimeout(draftTimer);
-  for (const t of (await db.get('templates')) || []) await db.del(`draft:${t.id}`);
-  state.shared = {};
-  await db.del('shared');
-  for (const f of state.fields) f.value = emptyValue(f);
-  renderForm();
-  updatePreview();
-  toast('Pronto para um novo paciente.');
-});
-
 $('generate').addEventListener('click', generate);
 $('share').addEventListener('click', share);
-$('open').addEventListener('click', openPdf);
+$('open').addEventListener('click', openOutput);
 
 /* ---------- Início ---------- */
 
 (async () => {
-  // Migra o formato antigo (um único modelo salvo)
-  const legacy = await db.get('template');
-  if (legacy && legacy.bytes) {
-    const bytes = new Uint8Array(legacy.bytes);
-    const id = templateId(legacy.name, bytes);
-    await rememberTemplate(id, legacy.name, bytes);
-    const draft = await db.get('draft');
-    if (draft && draft.templateId === id) await db.set(`draft:${id}`, draft.values);
-    await db.set('current', id);
-    await db.del('template');
-    await db.del('draft');
-  }
-
-  state.shared = (await db.get('shared')) || {};
-  const list = (await db.get('templates')) || [];
+  state.presets = (await db.get('presets')) || {};
+  renderPresets();
+  const list = (await db.get('recent')) || [];
   const current = await db.get('current');
   const id = list.some((t) => t.id === current) ? current : (list[0] && list[0].id);
-  if (id) await openSavedTemplate(id);
+  if (id) await openSavedPdf(id);
 })();
 
 document.addEventListener('visibilitychange', () => {

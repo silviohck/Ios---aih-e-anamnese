@@ -20,27 +20,37 @@
   </header>
 
   <main>
-    <section class="card" id="template-card">
-      <h2>1. Documento</h2>
-      <select id="template-select" aria-label="Documento" hidden></select>
-      <p class="muted" id="template-info">Nenhum PDF carregado.</p>
+    <section class="card" id="pdf-card">
+      <h2>1. PDF do paciente</h2>
+      <p class="muted small">AIH e anamnese no mesmo PDF. O que já vier preenchido (nome, endereço, cadastro) é mantido.</p>
+      <select id="recent-select" aria-label="PDFs recentes" hidden></select>
+      <p class="muted" id="pdf-info">Nenhum PDF aberto.</p>
       <div class="row">
-        <label class="btn primary" for="pdf-input">Adicionar PDF</label>
+        <label class="btn primary" for="pdf-input">Abrir PDF</label>
         <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
-        <button class="btn" id="forget-template" hidden>Remover este modelo</button>
+        <button class="btn" id="forget-pdf" type="button" hidden>Remover este PDF</button>
       </div>
     </section>
 
     <section class="card" id="form-card" hidden>
-      <h2>2. Preencher campos</h2>
+      <h2>2. Conferir e completar</h2>
       <p class="muted" id="form-info"></p>
       <input type="search" id="field-filter" placeholder="Buscar campo…" autocomplete="off">
+      <label class="check">
+        <input type="checkbox" id="only-empty">
+        Mostrar só campos vazios
+      </label>
       <form id="fields-form" autocomplete="off"></form>
       <div class="row">
-        <button class="btn" id="clear-form" type="button">Limpar esta ficha</button>
-        <button class="btn" id="new-patient" type="button">Novo paciente</button>
+        <button class="btn" id="restore-form" type="button">Restaurar como veio no PDF</button>
       </div>
-      <p class="muted small">Campos com o mesmo nome nas duas fichas (ex.: nome do paciente, Cartão SUS) são preenchidos automaticamente na outra. "Novo paciente" apaga os dados de todas as fichas.</p>
+    </section>
+
+    <section class="card" id="presets-card">
+      <h2>Valores fixos</h2>
+      <p class="muted small">Toque em <strong>Fixar</strong> ao lado de um campo para que aquele valor seja preenchido automaticamente em todo PDF novo, sempre que o campo vier vazio.</p>
+      <p class="muted small" id="presets-empty">Nenhum valor fixo ainda.</p>
+      <ul id="presets-list"></ul>
     </section>
 
     <section class="card" id="output-card" hidden>
@@ -54,7 +64,7 @@
       </div>
       <div class="row" id="result-actions" hidden>
         <button class="btn primary" id="share" type="button">Imprimir / Compartilhar</button>
-        <button class="btn" id="open" type="button">Abrir PDF</button>
+        <button class="btn" id="open" type="button">Visualizar</button>
         <a class="btn" id="download" download>Baixar</a>
       </div>
       <p class="muted small" id="result-info"></p>
@@ -62,7 +72,7 @@
 
     <section class="card" id="data-card" hidden>
       <h2>Dados registrados no PDF</h2>
-      <p class="muted small">Estes dados são gravados dentro do arquivo: nos metadados (Título, Assunto, Palavras-chave e a chave <code>AIHAnamneseDados</code>) e num anexo <code>dados-preenchidos.json</code>. Se você abrir de novo um PDF gerado por aqui, o app lê esses dados e preenche os campos.</p>
+      <p class="muted small">Estes dados são gravados dentro do arquivo: nos metadados (Título, Assunto, Palavras-chave e a chave <code>AIHAnamneseDados</code>) e num anexo <code>dados-preenchidos.json</code>. Para cada campo fica registrada a origem: <code>pdf</code> (veio no PDF), <code>fixo</code> (valor fixo) ou <code>digitado</code>. Se você abrir de novo um PDF gerado por aqui, o app lê esses dados e preenche os campos.</p>
       <pre id="data-preview"></pre>
     </section>
   </main>
