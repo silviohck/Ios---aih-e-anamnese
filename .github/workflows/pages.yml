@@ -2,7 +2,7 @@ name: Publicar no GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/ios-app-viability-ecmvit]
   workflow_dispatch:
 
 permissions:

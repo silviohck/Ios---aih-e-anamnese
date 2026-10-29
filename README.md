@@ -49,9 +49,10 @@ Tudo roda **somente no aparelho**: nenhum dado de paciente é enviado para servi
 
 ## Publicação (GitHub Pages)
 
-O workflow `.github/workflows/pages.yml` publica o app quando há push na branch `main`.
+Endereço: **https://silviohck.github.io/Ios---aih-e-anamnese/**
+
+O workflow `.github/workflows/pages.yml` publica o app a cada push na branch principal.
 Para ativar: **Settings → Pages → Source: GitHub Actions**.
-(Em repositório privado, o GitHub Pages exige plano pago. Outra opção é qualquer hospedagem de site estático com HTTPS, como Netlify ou Cloudflare Pages.)
 
 Os arquivos publicados são só o código do app. Nenhum PDF ou dado de paciente fica no repositório.
 
