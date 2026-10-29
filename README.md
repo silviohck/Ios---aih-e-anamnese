@@ -12,13 +12,21 @@ Web app para iPhone que:
 
    Se você abrir de novo um PDF gerado pelo app, ele lê esses dados e preenche os campos automaticamente.
 
+## Duas fichas: AIH e anamnese
+
+Você pode adicionar **vários PDFs** (ex.: o laudo de AIH e a ficha de anamnese). Eles ficam salvos no aparelho e você troca entre eles pela lista **Documento** no topo.
+
+- Cada ficha tem o **seu rascunho**, salvo enquanto você digita.
+- **Dados em comum são preenchidos automaticamente na outra ficha.** O app reconhece campos equivalentes pelo nome ou pela descrição do campo no PDF: `paciente.nome`, `nome_paciente` e um campo descrito como "Nome do paciente" contam como o mesmo campo. O último valor digitado vale para as duas fichas.
+- **Limpar esta ficha** apaga só a ficha aberta. **Novo paciente** apaga os dados de todas as fichas.
+
 Tudo roda **somente no aparelho**: nenhum dado de paciente é enviado para servidor. O modelo PDF e o rascunho ficam salvos no próprio iPhone, então não é preciso escolher o PDF toda vez.
 
 ## Como usar no iPhone
 
 1. Abra o endereço do app no **Safari**.
 2. Toque em **Compartilhar → Adicionar à Tela de Início**. Ele passa a abrir como um app e funciona sem internet.
-3. **Escolher PDF** → selecione o formulário (Arquivos, iCloud, e-mail…).
+3. **Adicionar PDF** → selecione o formulário (Arquivos, iCloud, e-mail…). Repita para a outra ficha.
 4. Preencha os campos. Use **Buscar campo…** se o formulário for grande.
 5. **Gerar PDF preenchido** → **Imprimir / Compartilhar** → **Imprimir**.
 
@@ -43,7 +51,7 @@ Não tem etapa de build: são arquivos estáticos. A biblioteca [pdf-lib](https:
 
 ```sh
 python3 -m http.server 8123          # servir localmente
-node tests/make-sample.js            # gera tests/exemplo-formulario.pdf
+node tests/make-sample.js            # gera tests/exemplo-aih.pdf e tests/exemplo-anamnese.pdf
 node tests/e2e.js                    # teste completo no navegador (requer Playwright)
 ```
 

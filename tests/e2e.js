@@ -8,7 +8,8 @@ const { chromium, devices } = require('playwright');
 const { PDFDocument, PDFName, PDFDict, PDFArray } = require(path.join(__dirname, '..', 'vendor', 'pdf-lib.min.js'));
 
 const URL_APP = process.argv[2] || 'http://localhost:8123/';
-const SAMPLE = path.join(__dirname, 'exemplo-formulario.pdf');
+const SAMPLE = path.join(__dirname, 'exemplo-aih.pdf');
+const SAMPLE_ANAMNESE = path.join(__dirname, 'exemplo-anamnese.pdf');
 
 async function generatedBytes(page) {
   const b64 = await page.evaluate(async () => {
@@ -30,7 +31,7 @@ function attachmentCount(doc) {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('pageerror', (e) => { errors.push(e.message); console.error('PAGE ERROR', e.stack); });
   await page.goto(URL_APP);
 
   await page.setInputFiles('#pdf-input', SAMPLE);
@@ -43,7 +44,8 @@ function attachmentCount(doc) {
   await page.selectOption('#f3', 'Urgencia');
   await page.check('#f4');
   await page.fill('#f5', 'Dor abdominal há 3 dias → febre 38,5 °C.');
-  await page.screenshot({ path: process.env.SHOT || '/dev/null', fullPage: true });
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace(/\.png$/, '-1.png'), fullPage: true });
+  assert.strictEqual(await page.isVisible('#share'), false); // só aparece depois de gerar
   await page.click('#generate');
   await page.waitForSelector('#result-actions:not([hidden])');
 
@@ -81,6 +83,42 @@ function attachmentCount(doc) {
   // O modelo fica salvo no aparelho
   await page.reload();
   await page.waitForSelector('#form-card:not([hidden])');
+
+  // Segunda ficha: dados em comum vêm preenchidos da AIH
+  await page.setInputFiles('#pdf-input', SAMPLE_ANAMNESE);
+  await page.waitForFunction(() => /exemplo-anamnese/.test(document.querySelector('#template-info').textContent));
+  assert.strictEqual(await page.inputValue('#f0'), 'Maria José da Conceição'); // Texto1 (tooltip "Nome do paciente")
+  assert.strictEqual(await page.inputValue('#f1'), '123456789012345');         // cns_paciente
+  assert.strictEqual(await page.isChecked('#f5'), true);                       // tem_alergia
+  assert.match(await page.textContent('#form-info'), /da outra ficha/);
+  await page.fill('#f2', 'Dor abdominal');
+  await page.fill('#f0', 'Maria José da Conceição Silva');
+
+  // Troca para a AIH original: o nome corrigido na anamnese aparece lá
+  const aihId = await page.evaluate(() => [...document.querySelectorAll('#template-select option')].find((o) => o.textContent === 'exemplo-aih').value);
+  assert.strictEqual(await page.isVisible('#template-select'), true);
+  await page.selectOption('#template-select', aihId);
+  await page.waitForFunction(() => /exemplo-aih\.pdf/.test(document.querySelector('#template-info').textContent));
+  assert.strictEqual(await page.inputValue('#f0'), 'Maria José da Conceição Silva');
+  assert.strictEqual(await page.inputValue('#f1'), '123456789012345');
+
+  // Volta para a anamnese: o rascunho dela continua lá, mesmo depois de recarregar
+  await page.reload();
+  await page.waitForSelector('#form-card:not([hidden])');
+  const anaId = await page.evaluate(() => [...document.querySelectorAll('#template-select option')].find((o) => o.textContent === 'exemplo-anamnese').value);
+  await page.selectOption('#template-select', anaId);
+  await page.waitForFunction(() => /exemplo-anamnese/.test(document.querySelector('#template-info').textContent));
+  assert.strictEqual(await page.inputValue('#f2'), 'Dor abdominal');
+
+  // Novo paciente apaga tudo, em todas as fichas
+  page.on('dialog', (d) => d.accept());
+  await page.click('#new-patient');
+  await page.waitForFunction(() => document.querySelector('#f0').value === '');
+  await page.selectOption('#template-select', aihId);
+  await page.waitForFunction(() => /exemplo-aih\.pdf/.test(document.querySelector('#template-info').textContent));
+  assert.strictEqual(await page.inputValue('#f0'), '');
+  assert.strictEqual(await page.isChecked('#f4'), false);
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
 
   assert.deepStrictEqual(errors, []);
   await browser.close();

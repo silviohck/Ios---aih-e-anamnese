@@ -21,12 +21,13 @@
 
   <main>
     <section class="card" id="template-card">
-      <h2>1. Modelo PDF</h2>
+      <h2>1. Documento</h2>
+      <select id="template-select" aria-label="Documento" hidden></select>
       <p class="muted" id="template-info">Nenhum PDF carregado.</p>
       <div class="row">
-        <label class="btn primary" for="pdf-input">Escolher PDF</label>
+        <label class="btn primary" for="pdf-input">Adicionar PDF</label>
         <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
-        <button class="btn" id="forget-template" hidden>Remover modelo</button>
+        <button class="btn" id="forget-template" hidden>Remover este modelo</button>
       </div>
     </section>
 
@@ -36,8 +37,10 @@
       <input type="search" id="field-filter" placeholder="Buscar campo…" autocomplete="off">
       <form id="fields-form" autocomplete="off"></form>
       <div class="row">
-        <button class="btn" id="clear-form" type="button">Limpar campos</button>
+        <button class="btn" id="clear-form" type="button">Limpar esta ficha</button>
+        <button class="btn" id="new-patient" type="button">Novo paciente</button>
       </div>
+      <p class="muted small">Campos com o mesmo nome nas duas fichas (ex.: nome do paciente, Cartão SUS) são preenchidos automaticamente na outra. "Novo paciente" apaga os dados de todas as fichas.</p>
     </section>
 
     <section class="card" id="output-card" hidden>
