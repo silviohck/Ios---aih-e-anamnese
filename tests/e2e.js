@@ -53,7 +53,7 @@ async function generate(page) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => { errors.push(e.message); console.error('PAGE ERROR', e.stack); });
-  page.on('dialog', (d) => d.accept());
+  page.on('dialog', (d) => d.accept()); // confirmações (confirm)
   await page.goto(URL_APP);
 
   // Paciente 1: o cadastro já vem preenchido no PDF
@@ -152,8 +152,96 @@ async function generate(page) {
   assert.strictEqual(doc.getForm().getFields().length, 0);
   assert.strictEqual(attachmentCount(doc), 1);
 
+  // ---------- Atalhos ----------
+  await openFile(page, PACIENTE_2, 'João Pereira');
+  await page.click('#restore-form');
+  await page.waitForFunction(() => document.querySelector('#f6').value === '');
+  assert.match(await page.textContent('#shortcuts-empty'), /Nenhum atalho/);
+
+  // Cria o atalho "Apendicite" a partir do que está na tela
+  await page.fill(F.cid, 'K35.8');
+  await page.fill(F.queixa, 'Dor abdominal');
+  await page.fill(F.hda, 'Dor em FID.');
+  await page.selectOption(F.clinica, 'Cirúrgica');
+  await page.click('#new-shortcut');
+  await page.waitForSelector('#shortcut-dialog[open]');
+  // O cadastro que veio no PDF não aparece como opção
+  assert.strictEqual(await page.locator('#shortcut-fields input[value="paciente.nome"]').count(), 0);
+  for (const n of ['estabelecimento', 'carater_internacao', 'tem_alergia']) {
+    await page.uncheck(`#shortcut-fields input[value="${n}"]`);
+  }
+  await page.fill('#shortcut-name', 'Apendicite');
+  await page.press('#shortcut-name', 'Enter'); // Enter salva
+  await page.waitForSelector('#shortcut-dialog', { state: 'hidden' });
+  assert.strictEqual(await page.textContent(badge(F.cid)), 'Apendicite');
+
+  // Cria o atalho "Febre" só com a HDA
+  await page.click('#restore-form');
+  await page.waitForFunction(() => document.querySelector('#f6').value === '');
+  await page.fill(F.hda, 'Febre 38 °C há 1 dia.');
+  await page.click('#new-shortcut');
+  for (const cb of await page.locator('#shortcut-fields input').all()) {
+    if (await cb.getAttribute('value') !== 'Texto2') await cb.uncheck();
+  }
+  await page.fill('#shortcut-name', 'Febre');
+  await page.click('#shortcut-form button[type="submit"]');
+  await page.waitForSelector('#shortcut-dialog', { state: 'hidden' });
+  assert.deepStrictEqual(await page.locator('#shortcut-buttons button').allTextContents(), ['Apendicite', 'Febre']);
+
+  // Aplica os dois: a HDA recebe os dois textos
+  await page.click('#restore-form');
+  await page.waitForFunction(() => document.querySelector('#f9').value === '');
+  await page.click('#shortcut-buttons button:text-is("Apendicite")');
+  assert.strictEqual(await page.inputValue(F.cid), 'K35.8');
+  assert.strictEqual(await page.inputValue(F.clinica), 'Cirúrgica');
+  assert.strictEqual(await page.inputValue(F.hda), 'Dor em FID.');
+  await page.click('#shortcut-buttons button:text-is("Febre")');
+  assert.strictEqual(await page.inputValue(F.hda), 'Dor em FID.\nFebre 38 °C há 1 dia.');
+  // Desfazer
+  await page.click('#toast-action');
+  assert.strictEqual(await page.inputValue(F.hda), 'Dor em FID.');
+  await page.click('#shortcut-buttons button:text-is("Febre")');
+  await page.click('#shortcut-buttons button:text-is("Febre")'); // repetir não duplica
+  assert.strictEqual(await page.inputValue(F.hda), 'Dor em FID.\nFebre 38 °C há 1 dia.');
+  assert.match(await page.textContent('#toast-text'), /nada a alterar/);
+  assert.strictEqual(await page.textContent(badge(F.hda)), 'Apendicite + Febre');
+
+  // Backup: exporta e importa
+  await page.click('#shortcuts-manage summary');
+  assert.match(await page.textContent('#shortcuts-list'), /Apendicite/);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export-config')]);
+  const backup = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+  assert.strictEqual(backup.atalhos.length, 2);
+  assert.strictEqual(backup.valoresFixos.estabelecimento, 'Hospital São Lucas');
+  backup.atalhos.push({ name: 'Teste cadastro', values: { 'paciente.nome': 'Outro nome', cid_principal: 'A09' } });
+  const backupFile = path.join(os.tmpdir(), 'aih-backup.json');
+  fs.writeFileSync(backupFile, JSON.stringify(backup));
+  await page.setInputFiles('#import-input', backupFile);
+  await page.waitForFunction(() => document.querySelectorAll('#shortcut-buttons button').length === 3);
+  // Um atalho nunca altera o que veio no PDF
+  await page.click('#shortcut-buttons button:text-is("Teste cadastro")');
+  assert.strictEqual(await page.inputValue(F.nome), 'João Pereira Lima');
+  assert.strictEqual(await page.inputValue(F.cid), 'A09');
+  assert.match(await page.textContent('#toast-text'), /1 mantido\(s\) como veio no PDF/);
+  await page.click('#toast-action');
+  assert.strictEqual(await page.inputValue(F.cid), 'K35.8');
+
+  // Gera: atalhos registrados no PDF
+  doc = await generate(page);
+  data = JSON.parse(doc.getInfoDict().lookup(PDFName.of('AIHAnamneseDados')).decodeText());
+  assert.deepStrictEqual(data.atalhosAplicados.sort(), ['Apendicite', 'Febre']);
+  assert.strictEqual(data.origem.cid_principal, 'atalho');
+  assert.strictEqual(data.atalhos.Texto2.name, 'Apendicite + Febre');
+  assert.strictEqual(data.origem['paciente.nome'], 'pdf');
+
+  // Depois de recarregar: atalhos e etiquetas continuam
+  await page.waitForTimeout(600);
+  await page.reload();
+  await page.waitForSelector('#form-card:not([hidden])');
+  assert.strictEqual(await page.locator('#shortcut-buttons button').count(), 3);
+  assert.strictEqual(await page.textContent(badge(F.cid)), 'Apendicite');
+
   if (process.env.SHOT) {
-    await openFile(page, PACIENTE_2, 'João Pereira');
     await page.screenshot({ path: process.env.SHOT, fullPage: true });
   }
 

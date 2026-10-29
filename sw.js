@@ -1,5 +1,5 @@
 // Mantém o app funcionando sem internet. Altere VERSION ao publicar mudanças.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = `aih-anamnese-${VERSION}`;
 const FILES = [
   './',

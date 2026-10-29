@@ -16,6 +16,8 @@ const state = {
   pdf: null,      // { id, name, bytes: Uint8Array }
   fields: [],     // [{ name, label, type, options, multi, multiline, maxLength, value, original, input }]
   presets: {},    // valores fixos: { nomeDoCampo: valor }
+  shortcuts: [],  // atalhos: [{ id, name, values: { nomeDoCampo: valor } }]
+  applied: {},    // campos preenchidos por atalho neste PDF: { nomeDoCampo: { name, value } }
   output: null,   // { blob, url, fileName }
   loading: false, // true enquanto um PDF está sendo aberto
   rendering: false,
@@ -49,9 +51,13 @@ const db = (() => {
 
 /* ---------- Utilidades ---------- */
 
-function toast(msg, ms = 3500) {
+function toast(msg, ms = 3500, action) {
   const el = $('toast');
-  el.textContent = msg;
+  const btn = $('toast-action');
+  $('toast-text').textContent = msg;
+  btn.hidden = !action;
+  btn.onclick = action ? () => { el.hidden = true; action.run(); } : null;
+  if (action) btn.textContent = action.label;
   el.hidden = false;
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => { el.hidden = true; }, ms);
@@ -206,10 +212,13 @@ function findPatientName(values) {
   return entry ? values[entry.name].trim() : '';
 }
 
-// De onde veio cada valor: do PDF recebido, de um valor fixo ou digitado aqui.
+// De onde veio cada valor: do PDF recebido, de um atalho, de um valor fixo
+// ou digitado aqui.
 function originOf(f, value) {
   if (isEmpty(value)) return '';
   if (!isEmpty(f.original) && sameValue(value, f.original)) return 'pdf';
+  const a = state.applied[f.name];
+  if (a && sameValue(value, a.value)) return 'atalho';
   if (f.name in state.presets && sameValue(value, state.presets[f.name])) return 'fixo';
   return 'digitado';
 }
@@ -286,15 +295,18 @@ async function openPdf(name, bytes, { fromStorage = false } = {}) {
   $('result-actions').hidden = true;
   $('result-info').textContent = '';
 
+  state.applied = {};
   const fromPdf = state.fields.filter((f) => !isEmpty(f.original)).length;
   const embedded = readEmbeddedData(doc);
   const draft = await db.get(`draft:${id}`);
   let source;
   if (embedded && embedded.campos) {
     applyValues(embedded.campos);
+    state.applied = embedded.atalhos || {};
     source = 'Dados gravados por este app no PDF foram carregados.';
   } else if (draft) {
-    applyValues(draft);
+    applyValues(draft.values || draft);
+    state.applied = draft.applied || {};
     source = 'Rascunho anterior restaurado.';
   } else {
     const applied = applyPresets();
@@ -313,8 +325,10 @@ async function openPdf(name, bytes, { fromStorage = false } = {}) {
   $('field-filter').value = '';
   renderForm();
   renderPresets();
+  renderShortcuts();
 
   $('form-card').hidden = false;
+  $('shortcuts-card').hidden = !state.fields.length;
   $('output-card').hidden = !state.fields.length;
   $('data-card').hidden = !state.fields.length;
   $('form-info').textContent = state.fields.length
@@ -332,7 +346,7 @@ function applyValues(values) {
 
 /* ---------- Formulário ---------- */
 
-const ORIGIN_LABEL = { pdf: 'do PDF', fixo: 'fixo', digitado: '' };
+const ORIGIN_LABEL = { pdf: 'do PDF', fixo: 'fixo', atalho: 'atalho', digitado: '' };
 
 function renderForm() {
   const form = $('fields-form');
@@ -416,7 +430,7 @@ function readInput(f) {
 function updateFieldStatus(f) {
   const value = readInput(f);
   const origin = originOf(f, value);
-  f.badge.textContent = ORIGIN_LABEL[origin] || '';
+  f.badge.textContent = origin === 'atalho' ? state.applied[f.name].name : (ORIGIN_LABEL[origin] || '');
   f.badge.dataset.origin = origin;
   f.badge.hidden = !f.badge.textContent;
 
@@ -506,6 +520,225 @@ function renderPresets() {
   }
 }
 
+/* ---------- Atalhos ---------- */
+
+function setInput(f, v) {
+  const el = f.input;
+  f.value = v;
+  if (f.type === 'checkbox') el.checked = !!v;
+  else if (f.type === 'select' && f.multi) for (const o of el.options) o.selected = v.includes(o.value);
+  else el.value = v;
+}
+
+// Aplica um atalho. O que veio no PDF nunca é alterado. Em campos de texto
+// longo (ex.: HDA) que já têm texto, o texto do atalho é acrescentado numa
+// nova linha, para poder combinar vários atalhos; nos demais, é substituído.
+function applyShortcut(sc) {
+  const before = { values: collectValues(), applied: { ...state.applied } };
+  const changed = [];
+  let skippedPdf = 0;
+  for (const [name, v] of Object.entries(sc.values)) {
+    const f = state.fields.find((x) => x.name === name);
+    if (!f || !fitsField(f, v)) continue;
+    const current = readInput(f);
+    if (originOf(f, current) === 'pdf') { skippedPdf++; continue; }
+    let next = v;
+    let names = [sc.name];
+    if (f.type === 'text' && f.multiline && !isEmpty(current)) {
+      if (current.includes(v)) continue;
+      next = `${current.replace(/\s+$/, '')}\n${v}`;
+      const prev = state.applied[name];
+      if (prev && originOf(f, current) === 'atalho') names = [...(prev.names || [prev.name]), sc.name];
+    }
+    if (sameValue(current, next)) continue;
+    setInput(f, next);
+    state.applied[name] = { name: names.join(' + '), names, value: next };
+    changed.push(f);
+  }
+  changed.forEach(updateFieldStatus);
+  updatePreview();
+  saveDraft();
+  const extra = skippedPdf ? ` (${skippedPdf} mantido(s) como veio no PDF)` : '';
+  if (!changed.length) {
+    toast(`"${sc.name}": nada a alterar${extra}.`);
+    return;
+  }
+  toast(`"${sc.name}" aplicado em ${changed.length} campo(s)${extra}.`, 6000, {
+    label: 'Desfazer',
+    run: () => {
+      for (const f of state.fields) setInput(f, before.values[f.name]);
+      state.applied = before.applied;
+      state.fields.forEach(updateFieldStatus);
+      updatePreview();
+      saveDraft();
+    },
+  });
+}
+
+function renderShortcuts() {
+  const bar = $('shortcut-buttons');
+  bar.textContent = '';
+  for (const sc of state.shortcuts) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn shortcut';
+    b.textContent = sc.name;
+    b.addEventListener('click', () => applyShortcut(sc));
+    bar.append(b);
+  }
+  $('shortcuts-empty').hidden = state.shortcuts.length > 0;
+
+  const list = $('shortcuts-list');
+  list.textContent = '';
+  for (const sc of state.shortcuts) {
+    const li = document.createElement('li');
+    const text = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = sc.name;
+    const detail = document.createElement('span');
+    detail.className = 'muted small';
+    detail.textContent = Object.entries(sc.values).map(([n, v]) => {
+      const f = state.fields.find((x) => x.name === n);
+      return `${f ? f.label : prettyName(n)}: ${displayValue(v)}`;
+    }).join(' · ');
+    text.append(title, document.createElement('br'), detail);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn';
+    remove.textContent = 'Remover';
+    remove.addEventListener('click', () => {
+      if (!confirm(`Remover o atalho "${sc.name}"?`)) return;
+      state.shortcuts = state.shortcuts.filter((x) => x.id !== sc.id);
+      db.set('shortcuts', state.shortcuts);
+      renderShortcuts();
+    });
+    li.append(text, remove);
+    list.append(li);
+  }
+}
+
+// Monta a janela "Salvar como atalho" com os campos preenchidos que não
+// vieram do PDF (o cadastro do paciente não entra em atalho).
+function openShortcutDialog() {
+  const box = $('shortcut-fields');
+  box.textContent = '';
+  const candidates = state.fields.filter((f) => {
+    const o = originOf(f, readInput(f));
+    return o && o !== 'pdf';
+  });
+  if (!candidates.length) {
+    toast('Preencha na tela os campos que o atalho deve ter e toque de novo em "Salvar como atalho".', 5000);
+    return;
+  }
+  for (const f of candidates) {
+    const label = document.createElement('label');
+    label.className = 'check pick';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.value = f.name;
+    const text = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = f.label;
+    const value = document.createElement('span');
+    value.className = 'muted small';
+    value.textContent = displayValue(readInput(f));
+    text.append(title, document.createElement('br'), value);
+    label.append(cb, text);
+    box.append(label);
+  }
+  $('shortcut-name').value = '';
+  $('shortcut-dialog').showModal();
+}
+
+async function saveShortcutFromDialog() {
+  const name = $('shortcut-name').value.trim();
+  if (!name) {
+    toast('Dê um nome ao atalho.');
+    $('shortcut-name').focus();
+    return false;
+  }
+  const picked = [...$('shortcut-fields').querySelectorAll('input:checked')].map((cb) => cb.value);
+  if (!picked.length) {
+    toast('Marque pelo menos um campo.');
+    return false;
+  }
+  const values = {};
+  for (const n of picked) values[n] = readInput(state.fields.find((f) => f.name === n));
+
+  const existing = state.shortcuts.find((x) => normalize(x.name) === normalize(name));
+  if (existing && !confirm(`Já existe um atalho "${existing.name}". Substituir?`)) return false;
+  if (existing) Object.assign(existing, { name, values });
+  else state.shortcuts.push({ id: Date.now().toString(36), name, values });
+  // Os campos salvos passam a contar como preenchidos por este atalho
+  for (const n of picked) state.applied[n] = { name, names: [name], value: values[n] };
+  state.fields.forEach(updateFieldStatus);
+  renderShortcuts();
+  updatePreview();
+  saveDraft();
+  await db.set('shortcuts', state.shortcuts);
+  toast(`Atalho "${name}" salvo com ${picked.length} campo(s).`);
+  return true;
+}
+
+/* ---------- Backup da configuração ---------- */
+
+async function exportConfig() {
+  const config = {
+    app: APP_NAME,
+    tipo: 'configuracao',
+    versao: 1,
+    exportadoEm: new Date().toISOString(),
+    atalhos: state.shortcuts,
+    valoresFixos: state.presets,
+  };
+  const fileName = `aih-anamnese-atalhos-${timestamp()}.json`;
+  const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+  const file = new File([blob], fileName, { type: 'application/json' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: fileName });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+async function importConfig(file) {
+  let config;
+  try {
+    config = JSON.parse(await file.text());
+  } catch (_) {
+    toast('Arquivo inválido.');
+    return;
+  }
+  const shortcuts = Array.isArray(config.atalhos) ? config.atalhos.filter((x) => x && x.name && x.values && typeof x.values === 'object') : [];
+  const presets = config.valoresFixos && typeof config.valoresFixos === 'object' ? config.valoresFixos : {};
+  if (!shortcuts.length && !Object.keys(presets).length) {
+    toast('Nenhum atalho ou valor fixo encontrado no arquivo.');
+    return;
+  }
+  if (!confirm(`Importar ${shortcuts.length} atalho(s) e ${Object.keys(presets).length} valor(es) fixo(s)? Atalhos com o mesmo nome serão substituídos.`)) return;
+  for (const sc of shortcuts) {
+    const existing = state.shortcuts.find((x) => normalize(x.name) === normalize(sc.name));
+    if (existing) existing.values = sc.values;
+    else state.shortcuts.push({ id: sc.id || `${Date.now().toString(36)}${state.shortcuts.length}`, name: sc.name, values: sc.values });
+  }
+  Object.assign(state.presets, presets);
+  await db.set('shortcuts', state.shortcuts);
+  await db.set('presets', state.presets);
+  renderShortcuts();
+  renderPresets();
+  state.fields.forEach(updateFieldStatus);
+  toast('Configuração importada.');
+}
+
 /* ---------- Dados e rascunho ---------- */
 
 function buildPayload(values) {
@@ -516,12 +749,15 @@ function buildPayload(values) {
   }
   return {
     app: APP_NAME,
-    versao: 2,
+    versao: 3,
     geradoEm: new Date().toISOString(),
     arquivoOriginal: state.pdf.name,
     paciente: findPatientName(values) || undefined,
     campos: values,
     origem,
+    atalhosAplicados: [...new Set(Object.keys(origem).filter((n) => origem[n] === 'atalho')
+      .flatMap((n) => state.applied[n].names || [state.applied[n].name]))],
+    atalhos: Object.fromEntries(Object.entries(state.applied).filter(([n]) => origem[n] === 'atalho')),
   };
 }
 
@@ -543,7 +779,7 @@ function onFormInput(e) {
 function saveDraft() {
   clearTimeout(draftTimer);
   if (!state.pdf || state.loading) return Promise.resolve();
-  return db.set(`draft:${state.pdf.id}`, collectValues());
+  return db.set(`draft:${state.pdf.id}`, { values: collectValues(), applied: state.applied });
 }
 
 /* ---------- Geração do PDF ---------- */
@@ -691,11 +927,25 @@ $('only-empty').addEventListener('change', applyFilter);
 $('restore-form').addEventListener('click', async () => {
   if (!confirm('Voltar os campos para como vieram no PDF (mais os valores fixos)? O que foi digitado aqui será apagado.')) return;
   for (const f of state.fields) f.value = f.original;
+  state.applied = {};
   applyPresets();
   renderForm();
   applyFilter();
   updatePreview();
   await saveDraft();
+});
+
+$('new-shortcut').addEventListener('click', openShortcutDialog);
+$('shortcut-cancel').addEventListener('click', () => $('shortcut-dialog').close());
+$('shortcut-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (await saveShortcutFromDialog()) $('shortcut-dialog').close();
+});
+$('export-config').addEventListener('click', exportConfig);
+$('import-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (file) await importConfig(file);
 });
 
 $('generate').addEventListener('click', generate);
@@ -706,7 +956,9 @@ $('open').addEventListener('click', openOutput);
 
 (async () => {
   state.presets = (await db.get('presets')) || {};
+  state.shortcuts = (await db.get('shortcuts')) || [];
   renderPresets();
+  renderShortcuts();
   const list = (await db.get('recent')) || [];
   const current = await db.get('current');
   const id = list.some((t) => t.id === current) ? current : (list[0] && list[0].id);

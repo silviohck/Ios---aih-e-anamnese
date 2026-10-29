@@ -129,8 +129,8 @@ textarea { min-height: 88px; resize: vertical; }
 .pin[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .pin:disabled { opacity: .4; }
 
-#presets-list { list-style: none; margin: 0; padding: 0; }
-#presets-list li {
+.item-list { list-style: none; margin: 0; padding: 0; }
+.item-list li {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -138,8 +138,30 @@ textarea { min-height: 88px; resize: vertical; }
   padding: 10px 0;
   border-top: 1px solid var(--border);
 }
-#presets-list li > div { min-width: 0; word-break: break-word; }
-#presets-list .muted { margin: 0; }
+.item-list li > div { min-width: 0; word-break: break-word; }
+.item-list .muted { margin: 0; }
+
+#shortcut-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn.shortcut { border-color: var(--accent); color: var(--accent); }
+
+details { margin-top: 12px; }
+summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+
+dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+}
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog h2 { margin: 0 0 12px; font-size: 1.05rem; }
+dialog #shortcut-name { margin-bottom: 12px; }
+.check.pick { align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--border); }
+.check.pick input { flex: none; margin-top: 2px; }
+.check.pick span { min-width: 0; word-break: break-word; }
 #recent-select { margin-bottom: 8px; }
 .field .hint { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; word-break: break-all; }
 
@@ -172,4 +194,19 @@ pre {
   color: var(--bg);
   text-align: center;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+#toast-action {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--bg);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bg);
+  font: inherit;
+  font-weight: 700;
 }

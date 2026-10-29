@@ -32,6 +32,25 @@
       </div>
     </section>
 
+    <section class="card" id="shortcuts-card" hidden>
+      <h2>Atalhos</h2>
+      <p class="muted small" id="shortcuts-empty">Nenhum atalho ainda. Preencha os campos com o texto desejado e toque em <strong>Salvar como atalho</strong>.</p>
+      <div id="shortcut-buttons"></div>
+      <div class="row">
+        <button class="btn" id="new-shortcut" type="button">+ Salvar como atalho</button>
+      </div>
+      <details id="shortcuts-manage">
+        <summary>Gerenciar atalhos e backup</summary>
+        <ul class="item-list" id="shortcuts-list"></ul>
+        <p class="muted small">Os atalhos e valores fixos ficam só neste iPhone. Exporte um backup para não perdê-los ou para levá-los a outro aparelho.</p>
+        <div class="row">
+          <button class="btn" id="export-config" type="button">Exportar backup</button>
+          <label class="btn" for="import-input">Importar backup</label>
+          <input type="file" id="import-input" accept="application/json,.json" hidden>
+        </div>
+      </details>
+    </section>
+
     <section class="card" id="form-card" hidden>
       <h2>2. Conferir e completar</h2>
       <p class="muted" id="form-info"></p>
@@ -50,7 +69,7 @@
       <h2>Valores fixos</h2>
       <p class="muted small">Toque em <strong>Fixar</strong> ao lado de um campo para que aquele valor seja preenchido automaticamente em todo PDF novo, sempre que o campo vier vazio.</p>
       <p class="muted small" id="presets-empty">Nenhum valor fixo ainda.</p>
-      <ul id="presets-list"></ul>
+      <ul class="item-list" id="presets-list"></ul>
     </section>
 
     <section class="card" id="output-card" hidden>
@@ -72,12 +91,28 @@
 
     <section class="card" id="data-card" hidden>
       <h2>Dados registrados no PDF</h2>
-      <p class="muted small">Estes dados são gravados dentro do arquivo: nos metadados (Título, Assunto, Palavras-chave e a chave <code>AIHAnamneseDados</code>) e num anexo <code>dados-preenchidos.json</code>. Para cada campo fica registrada a origem: <code>pdf</code> (veio no PDF), <code>fixo</code> (valor fixo) ou <code>digitado</code>. Se você abrir de novo um PDF gerado por aqui, o app lê esses dados e preenche os campos.</p>
+      <p class="muted small">Estes dados são gravados dentro do arquivo: nos metadados (Título, Assunto, Palavras-chave e a chave <code>AIHAnamneseDados</code>) e num anexo <code>dados-preenchidos.json</code>. Para cada campo fica registrada a origem: <code>pdf</code> (veio no PDF), <code>atalho</code> (com o nome do atalho), <code>fixo</code> (valor fixo) ou <code>digitado</code>. Se você abrir de novo um PDF gerado por aqui, o app lê esses dados e preenche os campos.</p>
       <pre id="data-preview"></pre>
     </section>
   </main>
 
-  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="shortcut-dialog">
+    <form id="shortcut-form" method="dialog">
+      <h2>Salvar como atalho</h2>
+      <input type="text" id="shortcut-name" placeholder="Nome do atalho (ex.: Apendicite)" autocomplete="off">
+      <p class="muted small">Campos que entram no atalho (o cadastro que veio no PDF não entra):</p>
+      <div id="shortcut-fields"></div>
+      <div class="row">
+        <button class="btn" type="button" id="shortcut-cancel">Cancelar</button>
+        <button class="btn primary" type="submit">Salvar atalho</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button id="toast-action" type="button" hidden></button>
+  </div>
 
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="app.js"></script>

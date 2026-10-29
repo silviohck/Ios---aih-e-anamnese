@@ -4,14 +4,26 @@ Web app para iPhone que recebe o **PDF do paciente com AIH e anamnese juntos**, 
 
 1. **Identifica todos os campos sozinho** e mostra o que já veio preenchido (marcado como **do PDF**). Esses dados são mantidos.
 2. **Completa automaticamente os campos que você fixou** (marcados como **fixo**), como estabelecimento, clínica ou médico solicitante.
-3. Deixa você **completar o resto**. A opção **Mostrar só campos vazios** mostra só o que falta.
+3. Completa campos com **atalhos**: um toque e vários campos recebem textos pré-definidos (ver abaixo). O resto você digita. A opção **Mostrar só campos vazios** mostra só o que falta.
 4. **Gera o PDF preenchido** e envia para **impressão (AirPrint)** pela folha de compartilhamento do iPhone.
 5. **Grava os dados dentro do próprio PDF**:
    - metadados do arquivo: Título (com o nome do paciente), Assunto, Palavras-chave;
-   - chave própria `AIHAnamneseDados` no dicionário de informações do PDF, com todos os campos em JSON e a **origem de cada valor** (`pdf`, `fixo` ou `digitado`);
+   - chave própria `AIHAnamneseDados` no dicionário de informações do PDF, com todos os campos em JSON, a **origem de cada valor** (`pdf`, `atalho`, `fixo` ou `digitado`) e os atalhos usados;
    - anexo `dados-preenchidos.json` dentro do PDF.
 
    Se você abrir de novo um PDF gerado pelo app, ele lê esses dados e preenche os campos.
+
+## Atalhos
+
+Um atalho é um conjunto de textos com nome (ex.: "Apendicite") que preenche vários campos de uma vez: CID, queixa, HDA, clínica…
+
+- **Criar:** preencha os campos com o texto desejado, toque em **+ Salvar como atalho**, dê um nome e marque quais campos entram. O cadastro que veio no PDF não entra em atalho.
+- **Usar:** toque no botão do atalho. Aparece um aviso com **Desfazer**.
+- **Combinar:** em campos de texto longo (ex.: HDA) que já têm texto, o atalho **acrescenta** o texto numa nova linha, sem apagar o que já está lá; aplicar o mesmo atalho de novo não duplica. Nos demais campos, o valor é substituído.
+- **O que veio no PDF nunca é alterado** por um atalho.
+- Cada campo mostra a etiqueta com o nome do atalho que o preencheu (ex.: "Apendicite + Febre"), e o PDF gerado registra quais atalhos foram usados (`atalhosAplicados`).
+- **Gerenciar atalhos e backup:** lista os atalhos (com opção de remover) e permite **exportar/importar um backup** (arquivo `.json` com atalhos e valores fixos). Atalhos e valores fixos ficam só no iPhone, então vale guardar um backup.
+- Para editar um atalho, preencha a tela como quiser e salve com o mesmo nome: o app pergunta se deve substituir.
 
 ## Valores fixos
 
