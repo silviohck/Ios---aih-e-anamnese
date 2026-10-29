@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AIH &amp; Anamnese</title>
+  <meta name="theme-color" content="#0b6e4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="AIH">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>AIH &amp; Anamnese</h1>
+  </header>
+
+  <main>
+    <section class="card" id="template-card">
+      <h2>1. Modelo PDF</h2>
+      <p class="muted" id="template-info">Nenhum PDF carregado.</p>
+      <div class="row">
+        <label class="btn primary" for="pdf-input">Escolher PDF</label>
+        <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden>
+        <button class="btn" id="forget-template" hidden>Remover modelo</button>
+      </div>
+    </section>
+
+    <section class="card" id="form-card" hidden>
+      <h2>2. Preencher campos</h2>
+      <p class="muted" id="form-info"></p>
+      <input type="search" id="field-filter" placeholder="Buscar campo…" autocomplete="off">
+      <form id="fields-form" autocomplete="off"></form>
+      <div class="row">
+        <button class="btn" id="clear-form" type="button">Limpar campos</button>
+      </div>
+    </section>
+
+    <section class="card" id="output-card" hidden>
+      <h2>3. Gerar e imprimir</h2>
+      <label class="check">
+        <input type="checkbox" id="flatten">
+        Travar campos (o PDF final não poderá ser editado)
+      </label>
+      <div class="row">
+        <button class="btn primary" id="generate" type="button">Gerar PDF preenchido</button>
+      </div>
+      <div class="row" id="result-actions" hidden>
+        <button class="btn primary" id="share" type="button">Imprimir / Compartilhar</button>
+        <button class="btn" id="open" type="button">Abrir PDF</button>
+        <a class="btn" id="download" download>Baixar</a>
+      </div>
+      <p class="muted small" id="result-info"></p>
+    </section>
+
+    <section class="card" id="data-card" hidden>
+      <h2>Dados registrados no PDF</h2>
+      <p class="muted small">Estes dados são gravados dentro do arquivo: nos metadados (Título, Assunto, Palavras-chave e a chave <code>AIHAnamneseDados</code>) e num anexo <code>dados-preenchidos.json</code>. Se você abrir de novo um PDF gerado por aqui, o app lê esses dados e preenche os campos.</p>
+      <pre id="data-preview"></pre>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
