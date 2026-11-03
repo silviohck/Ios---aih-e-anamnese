@@ -41,8 +41,19 @@ jobs:
           name: Solicitacoes-mac
           path: desktop/dist/*.dmg
           if-no-files-found: error
-      - name: Publicar na release
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
+      - name: Ler versão
+        id: versao
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # Publica na página de versões (Releases) com link direto, sem precisar de login
+      - name: Publicar na página de versões
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: desktop-v${{ steps.versao.outputs.v }}
+          target_commitish: ${{ github.sha }}
+          name: Solicitações ${{ steps.versao.outputs.v }} (Mac)
+          prerelease: true
           files: desktop/dist/*.dmg
+          body: |
+            Baixe o arquivo **Solicitacoes-${{ steps.versao.outputs.v }}-mac.dmg** abaixo.
+            Na primeira vez: Ajustes do Sistema → Privacidade e Segurança → Abrir mesmo assim.
+            Se aparecer "está danificado": no Terminal, `xattr -cr /Applications/Solicitações.app`.
