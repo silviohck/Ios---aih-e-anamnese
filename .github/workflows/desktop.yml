@@ -1,4 +1,4 @@
-name: App desktop (Mac e Windows)
+name: App desktop (Mac)
 
 on:
   push:
@@ -22,14 +22,8 @@ jobs:
 
   build:
     needs: testes
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            alvo: mac
-          - os: windows-latest
-            alvo: win
-    runs-on: ${{ matrix.os }}
+    # Por enquanto só Mac; o Windows entra depois (npm run dist:win)
+    runs-on: macos-latest
     defaults: { run: { working-directory: desktop } }
     steps:
       - uses: actions/checkout@v4
@@ -37,21 +31,17 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: desktop/package-lock.json }
       - run: npm ci
       - name: Gerar instalador
-        run: npm run dist:${{ matrix.alvo }}
+        run: npm run dist:mac
         env:
           # Sem certificado: o instalador sai sem assinatura digital
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - uses: actions/upload-artifact@v4
         with:
-          name: Solicitacoes-${{ matrix.alvo }}
-          path: |
-            desktop/dist/*.dmg
-            desktop/dist/*.exe
+          name: Solicitacoes-mac
+          path: desktop/dist/*.dmg
           if-no-files-found: error
       - name: Publicar na release
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            desktop/dist/*.dmg
-            desktop/dist/*.exe
+          files: desktop/dist/*.dmg

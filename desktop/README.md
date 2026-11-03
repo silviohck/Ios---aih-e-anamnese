@@ -1,4 +1,6 @@
-# Solicitações (Mac e Windows)
+# Solicitações (Mac)
+
+> Desenvolvimento focado no Mac. A versão Windows vem depois (o código já é compatível; falta gerar e testar o instalador).
 
 App de computador para acompanhar solicitações de **exames, procedimentos, terapias, cirurgias/internações e OPME**,
 tanto por **plano de saúde** quanto **particular**.
@@ -36,7 +38,7 @@ Não é feito para várias pessoas editarem ao mesmo tempo.
 
 ## Instalar
 
-Os instaladores são gerados pelo GitHub Actions (workflow **App desktop (Mac e Windows)**) a cada alteração nesta pasta:
+Os instaladores são gerados pelo GitHub Actions (workflow **App desktop (Mac)**) a cada alteração nesta pasta:
 baixe em *Actions → execução mais recente → Artifacts*. Para gerar uma versão na aba *Releases*, crie uma tag
 `desktop-v0.1.0`.
 
