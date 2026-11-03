@@ -36,16 +36,20 @@ exportar/importar backup.
 gravar enquanto este está aberto, o app avisa e recarrega a versão mais nova em vez de sobrescrevê-la.
 Não é feito para várias pessoas editarem ao mesmo tempo.
 
-## Instalar
+## Instalar no Mac
 
-Os instaladores são gerados pelo GitHub Actions (workflow **App desktop (Mac)**) a cada alteração nesta pasta:
-baixe em *Actions → execução mais recente → Artifacts*. Para gerar uma versão na aba *Releases*, crie uma tag
-`desktop-v0.1.0`.
+1. Abra a página de versões: https://github.com/silviohck/Ios---aih-e-anamnese/releases
+   e baixe **`Solicitacoes-x.y.z-mac.dmg`** (funciona em Mac Intel e Apple Silicon; não precisa de conta no GitHub).
+2. Abra o `.dmg` e arraste **Solicitações** para a pasta **Aplicativos**.
+3. Na primeira vez o Mac avisa que não pode verificar o desenvolvedor (o app ainda não tem assinatura paga da Apple):
+   - abra **Ajustes do Sistema → Privacidade e Segurança**, role até o aviso sobre "Solicitações" e clique em
+     **Abrir mesmo assim**; ou
+   - no Finder, clique com o botão direito no app → **Abrir** → **Abrir**.
+4. Se ainda assim aparecer "está danificado e não pode ser aberto", no Terminal rode:
+   `xattr -cr /Applications/Solicitações.app` e abra de novo.
 
-- **Windows**: `Solicitações Setup x.y.z.exe`. Como o instalador não tem assinatura digital, o Windows pode mostrar
-  "O Windows protegeu o computador": clique em *Mais informações → Executar assim mesmo*.
-- **Mac**: `Solicitações-x.y.z-universal.dmg` (Intel e Apple Silicon). Sem assinatura da Apple, na primeira vez abra
-  pelo Finder com clique direito → *Abrir*, ou em *Ajustes do Sistema → Privacidade e Segurança → Abrir mesmo assim*.
+Cada alteração nesta pasta também gera o instalador em *Actions → App desktop (Mac) → Artifacts* (exige login).
+Para publicar uma nova versão na página de versões, crie uma tag `desktop-vX.Y.Z`.
 
 ## Desenvolvimento
 

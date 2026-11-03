@@ -38,7 +38,8 @@
           ]
         }
       ],
-      "category": "public.app-category.medical"
+      "category": "public.app-category.medical",
+      "identity": null
     },
     "win": {
       "target": [
@@ -55,6 +56,10 @@
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Solicitações"
     },
-    "publish": null
+    "publish": null,
+    "afterPack": "build/adhoc-sign.js",
+    "dmg": {
+      "artifactName": "Solicitacoes-${version}-mac.dmg"
+    }
   }
 }
