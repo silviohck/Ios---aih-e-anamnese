@@ -1,0 +1,60 @@
+{
+  "name": "solicitacoes",
+  "version": "0.1.0",
+  "description": "Acompanhamento de solicitações de exames, procedimentos e cirurgias (planos de saúde e particular)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/logic.test.js",
+    "test:e2e": "node tests/e2e.js",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "author": "silviohck",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "productName": "Solicitações",
+  "private": true,
+  "build": {
+    "appId": "br.silviohck.solicitacoes",
+    "productName": "Solicitações",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.medical"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Solicitações"
+    },
+    "publish": null
+  }
+}

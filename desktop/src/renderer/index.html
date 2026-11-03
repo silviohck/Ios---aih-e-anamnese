@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Solicitações</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="menu">
+    <div class="marca">
+      <div class="logo">S</div>
+      <div><strong>Solicitações</strong><small id="nomeClinica"></small></div>
+    </div>
+    <nav>
+      <button data-ir="painel" class="ativo">Painel</button>
+      <button data-ir="solicitacoes">Solicitações <span class="contador" id="contAlertas"></span></button>
+      <button data-ir="pacientes">Pacientes</button>
+      <button data-ir="convenios">Convênios</button>
+      <button data-ir="config">Configurações</button>
+    </nav>
+    <button class="primario grande" data-acao="nova-solicitacao">+ Nova solicitação</button>
+  </aside>
+  <main id="conteudo"></main>
+
+  <dialog id="modal"><form method="dialog" id="modalForm"></form></dialog>
+  <div id="aviso" class="aviso" hidden></div>
+
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
