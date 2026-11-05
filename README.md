@@ -60,6 +60,26 @@ Os últimos 15 PDFs abertos ficam na lista do topo, cada um com o seu rascunho, 
 
 Tudo roda **somente no aparelho**: nenhum dado de paciente é enviado para servidor.
 
+## Transcrição de Consulta (app separado)
+
+Endereço: **https://silviohck.github.io/Ios---aih-e-anamnese/transcricao/**
+
+Grava a consulta no iPhone, transcreve e organiza a anamnese:
+
+1. **Configuração** (uma vez): cole a chave da **OpenAI** (transcrição) e a da **Anthropic** (anamnese com Claude). Elas ficam só no aparelho.
+2. **Nova consulta:** nome do paciente (opcional), marque que ele **autorizou a gravação** e toque em **Gravar consulta**. Mantenha a tela ligada e o app aberto (o app pede para a tela não apagar). Dá para pausar.
+3. A gravação é enviada **em partes de 5 minutos** enquanto a consulta acontece, então a transcrição fica pronta logo depois de **Encerrar consulta**.
+4. Ao terminar a transcrição, o Claude gera a **anamnese**: identificação, queixa principal, HDA, interrogatório, antecedentes, medicações, alergias, hábitos, exame físico, exames, hipóteses (com CID-10), conduta e orientações. Também lista **pontos a confirmar** (doses, nomes de remédio ou trechos ambíguos) e mostra a **conversa separada por quem falou**.
+5. Revise e edite os campos. **Copiar** em cada campo, **Copiar anamnese** (tudo, só campos preenchidos) ou **Compartilhar**.
+
+Também aceita um **áudio já gravado** (m4a, mp3, wav…). Arquivos acima de 25 MB são divididos no próprio aparelho.
+
+**Privacidade:** o áudio sai do aparelho só para a OpenAI, e a transcrição só para a Anthropic, usando as suas chaves. O áudio é **apagado do aparelho assim que é transcrito**; transcrições e anamneses ficam só no aparelho (lista **Consultas**). Peça o consentimento do paciente e verifique se o uso atende à LGPD e às regras do seu serviço. A anamnese é gerada por IA: sempre revise antes de usar no prontuário.
+
+**Custo aproximado** por consulta de 15 min: transcrição ~US$ 0,09 (gpt-4o-transcribe) + anamnese ~US$ 0,10–0,25 (Claude Opus 5.5). O Sonnet 5.5 sai mais barato.
+
+**Limitações:** se a tela bloquear ou outro app usar o microfone (ex.: ligação), o iPhone para a gravação; o que já foi gravado fica salvo e é transcrito. Sem internet, as partes ficam na fila e podem ser reenviadas com **Tentar de novo**.
+
 ## Publicação (GitHub Pages)
 
 Endereço: **https://silviohck.github.io/Ios---aih-e-anamnese/**
@@ -82,6 +102,7 @@ Não tem etapa de build: são arquivos estáticos. A biblioteca [pdf-lib](https:
 python3 -m http.server 8123          # servir localmente
 node tests/make-sample.js            # gera os PDFs de exemplo em tests/
 node tests/e2e.js                    # teste completo no navegador (requer Playwright)
+node tests/transcricao-e2e.js        # teste do app de transcrição (APIs simuladas)
 ```
 
-Ao publicar mudanças, altere `VERSION` em `sw.js` para o iPhone baixar a versão nova.
+Ao publicar mudanças, altere `VERSION` em `sw.js` (e em `transcricao/sw.js`) para o iPhone baixar a versão nova.

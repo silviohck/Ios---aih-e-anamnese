@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Transcrição de Consulta</title>
+  <meta name="theme-color" content="#0b6e4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Consulta">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="../icons/icon-180.png">
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Transcrição de Consulta</h1>
+  </header>
+
+  <main>
+    <!-- Configuração -->
+    <section class="card" id="setup-card">
+      <details id="setup-details">
+        <summary>Configuração <span class="badge" id="setup-badge"></span></summary>
+        <p class="muted small">As chaves ficam guardadas só neste aparelho e são enviadas apenas para a OpenAI (transcrição) e para a Anthropic (anamnese).</p>
+        <label class="lbl" for="cfg-openai">Chave da OpenAI (transcrição)</label>
+        <input type="password" id="cfg-openai" autocomplete="off" spellcheck="false" placeholder="sk-...">
+        <label class="lbl" for="cfg-anthropic">Chave da Anthropic (anamnese com Claude)</label>
+        <input type="password" id="cfg-anthropic" autocomplete="off" spellcheck="false" placeholder="sk-ant-...">
+        <label class="lbl" for="cfg-stt">Modelo de transcrição</label>
+        <select id="cfg-stt">
+          <option value="gpt-4o-transcribe">gpt-4o-transcribe (melhor qualidade)</option>
+          <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe (mais barato)</option>
+          <option value="whisper-1">whisper-1</option>
+        </select>
+        <label class="lbl" for="cfg-claude">Modelo da anamnese</label>
+        <select id="cfg-claude">
+          <option value="claude-opus-5-5">Claude Opus 5.5 (melhor qualidade)</option>
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (mais rápido e barato)</option>
+        </select>
+        <label class="lbl" for="cfg-extra">Instruções extras para a anamnese (opcional)</label>
+        <textarea id="cfg-extra" placeholder="Ex.: Sou cirurgião geral. Use abreviações comuns (HAS, DM2). Escreva a HDA em texto corrido."></textarea>
+        <div class="row">
+          <button class="btn primary" id="cfg-save" type="button">Salvar configuração</button>
+        </div>
+      </details>
+    </section>
+
+    <!-- Nova consulta -->
+    <section class="card" id="new-card">
+      <h2>Nova consulta</h2>
+      <label class="lbl" for="patient">Paciente (opcional)</label>
+      <input type="text" id="patient" autocomplete="off" placeholder="Nome ou iniciais">
+      <label class="check"><input type="checkbox" id="consent"> <span>O paciente autorizou a gravação da consulta</span></label>
+      <div class="row">
+        <button class="btn primary big" id="rec-start" type="button">● Gravar consulta</button>
+      </div>
+      <details>
+        <summary>Ou enviar um áudio já gravado</summary>
+        <p class="muted small">Gravação do app Gravador, WhatsApp etc. (m4a, mp3, wav, webm). Até cerca de 25 MB por arquivo.</p>
+        <input type="file" id="audio-file" accept="audio/*,video/mp4,.m4a,.mp3,.wav,.webm,.ogg">
+      </details>
+    </section>
+
+    <!-- Gravando -->
+    <section class="card recording" id="rec-card" hidden>
+      <div class="rec-head">
+        <span class="dot" id="rec-dot"></span>
+        <strong id="rec-state">Gravando</strong>
+        <span class="timer" id="rec-timer">00:00</span>
+      </div>
+      <div class="meter"><div id="rec-level"></div></div>
+      <p class="muted small" id="rec-hint">Mantenha a tela ligada e o app aberto durante a consulta.</p>
+      <div class="row">
+        <button class="btn" id="rec-pause" type="button">Pausar</button>
+        <button class="btn primary" id="rec-stop" type="button">■ Encerrar consulta</button>
+      </div>
+    </section>
+
+    <!-- Consulta aberta -->
+    <section class="card" id="visit-card" hidden>
+      <div class="visit-head">
+        <div>
+          <h2 id="visit-title"></h2>
+          <p class="muted small" id="visit-meta"></p>
+        </div>
+        <button class="btn" id="visit-close" type="button">Fechar</button>
+      </div>
+
+      <div id="segments" class="segments"></div>
+
+      <details id="transcript-details">
+        <summary>Transcrição</summary>
+        <textarea id="transcript" class="transcript" placeholder="A transcrição aparece aqui."></textarea>
+        <div class="row">
+          <button class="btn" id="copy-transcript" type="button">Copiar transcrição</button>
+        </div>
+      </details>
+
+      <div class="row">
+        <button class="btn primary" id="gen-anamnese" type="button">Gerar anamnese</button>
+      </div>
+      <p class="muted small" id="gen-status" hidden></p>
+
+      <div id="anamnese-block" hidden>
+        <h2 class="section-title">Anamnese</h2>
+        <p class="muted small">Gerada por IA a partir da conversa. Revise antes de usar no prontuário.</p>
+        <div id="anamnese-fields"></div>
+        <div id="pending-box" class="pending" hidden>
+          <strong>Pontos a confirmar</strong>
+          <ul id="pending-list"></ul>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="copy-all" type="button">Copiar anamnese</button>
+          <button class="btn" id="share-all" type="button">Compartilhar</button>
+        </div>
+        <details id="dialog-details">
+          <summary>Conversa (quem falou o quê)</summary>
+          <div id="dialog-list" class="dialog-list"></div>
+        </details>
+      </div>
+
+      <div class="row">
+        <button class="btn danger" id="visit-delete" type="button">Apagar consulta</button>
+      </div>
+    </section>
+
+    <!-- Histórico -->
+    <section class="card" id="history-card">
+      <h2>Consultas</h2>
+      <p class="muted small" id="history-empty">Nenhuma consulta ainda.</p>
+      <ul class="item-list" id="history"></ul>
+    </section>
+
+    <p class="muted small center">O áudio é apagado assim que é transcrito. Transcrições e anamneses ficam só neste aparelho.<br><a href="../">Abrir AIH &amp; Anamnese</a></p>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite" hidden><span id="toast-text"></span></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
